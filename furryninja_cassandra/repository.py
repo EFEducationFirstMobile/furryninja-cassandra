@@ -13,7 +13,7 @@ from furryninja.model import AttributesProperty, DateTimeProperty
 
 from furryninja.repository import Repository
 from furryninja import Settings, KeyProperty, Key, Model, StringProperty
-from furryninja.cassandra.query import CassandraQuery
+from .query import CassandraQuery
 import logging
 
 logger = logging.getLogger('cassandra.repo')

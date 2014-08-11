@@ -2,7 +2,7 @@ import json
 import unittest
 import datetime
 from furryninja import Model, StringProperty, FilterNode, key_ref
-from furryninja.cassandra.query import CassandraQuery
+from .query import CassandraQuery
 from furryninja.query import QueryException
 
 __author__ = 'broken'

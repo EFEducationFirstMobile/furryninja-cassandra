@@ -8,7 +8,7 @@ from cassandra.query import ValueSequence
 import mock
 import pytz
 from furryninja import KeyProperty, AttributesProperty, IntegerProperty, StringProperty, Model, Key, computed_property
-from furryninja.cassandra.repository import CassandraRepository, Edge
+from .repository import CassandraRepository, Edge
 from furryninja.model import DateTimeProperty
 
 __author__ = 'broken'
