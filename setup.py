@@ -14,6 +14,9 @@ setup(
     install_requires=[
         'mock==1.0.1',
         'nose==1.3.3',
+        'cassandra-driver',
+        'cql',
+        'blist',
         'furryninja'
     ],
     dependency_links=[
