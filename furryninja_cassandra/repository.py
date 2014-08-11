@@ -29,9 +29,9 @@ class Edge(Model):
 
 class CassandraRepository(Repository):
     def __init__(self, connection_class=Cluster):
-        cluster = connection_class(Settings.get('cassandra.hosts'))
+        cluster = connection_class(Settings.get('db.host'))
         cluster.set_core_connections_per_host(HostDistance.LOCAL, 10)
-        self.session = cluster.connect(keyspace=Settings.get('cassandra.keyspace'))
+        self.session = cluster.connect(keyspace=Settings.get('db.name'))
         self.session.row_factory = dict_factory
 
     def denormalize(self, model):
