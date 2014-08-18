@@ -8,6 +8,7 @@ from cassandra.query import ValueSequence
 import mock
 import pytz
 from furryninja import KeyProperty, AttributesProperty, IntegerProperty, StringProperty, Model, Key, computed_property
+from furryninja import QueryNotFoundException
 from .repository import CassandraRepository, Edge
 from furryninja.model import DateTimeProperty
 
@@ -188,6 +189,19 @@ class TestCassandraRepository(unittest.TestCase):
         self.assertEqual(self.repo.session.execute.call_args_list[0], mock.call('SELECT * FROM entity WHERE key = %(key)s LIMIT 1', parameters={
             'key': en.key.urlsafe()
         }))
+
+    def test_get_not_found_model(self):
+        class Entity(Model):
+            title = StringProperty()
+            description = StringProperty()
+
+        en = Entity()
+        self.repo.session.execute.side_effect = [
+            []
+        ]
+
+        with self.assertRaises(QueryNotFoundException):
+            self.repo.get(en)
 
     def test_get_model_with_blob(self):
         tag = [{

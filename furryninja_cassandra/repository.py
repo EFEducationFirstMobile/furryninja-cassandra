@@ -12,7 +12,7 @@ from cassandra.query import dict_factory, BatchStatement
 from furryninja.model import AttributesProperty, DateTimeProperty
 
 from furryninja.repository import Repository
-from furryninja import Settings, KeyProperty, Key, Model, StringProperty
+from furryninja import Settings, KeyProperty, Key, Model, StringProperty, QueryNotFoundException
 from .query import CassandraQuery
 import logging
 
@@ -135,13 +135,13 @@ class CassandraRepository(Repository):
         cql_statement, condition_values = CassandraQuery(query).select()
         rows = self.session.execute(cql_statement, parameters=condition_values)
 
-        try:
-            model_data = json.loads(rows[0]['blob']) if rows[0].get('blob', None) else rows[0]
-            model.populate(**model_data)
-            self.resolve_referenced_keys(model, fields=fields)
-            return model
-        except IndexError:
-            return None
+        if not rows:
+            raise QueryNotFoundException
+
+        model_data = json.loads(rows[0]['blob']) if rows[0].get('blob', None) else rows[0]
+        model.populate(**model_data)
+        self.resolve_referenced_keys(model, fields=fields)
+        return model
 
     def delete(self, model):
         edge_query = Edge.query(Edge.indoc == model.key)
