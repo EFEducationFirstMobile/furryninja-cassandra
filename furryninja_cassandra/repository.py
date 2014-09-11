@@ -64,7 +64,7 @@ class CassandraRepository(Repository):
                 serialized_node[name] = value
             return serialized_node
 
-        serialized = serialize_keys(model.items())
+        serialized = serialize_keys(model.entity_to_db())
         return serialized
 
     def set_edges_for_model(self, model, new_edges=None, existing_edges=None):

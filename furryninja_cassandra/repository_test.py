@@ -97,11 +97,13 @@ class TestCassandraRepository(unittest.TestCase):
     def test_denormalize_with_date(self):
         class Book(Model):
             published = DateTimeProperty(auto_now_add=True)
+            updated = DateTimeProperty(auto_now=True)
 
         book = Book()
         self.assertDictEqual(self.repo.denormalize(book), {
             'key': book.key.urlsafe(),
-            'published': book.published.replace(tzinfo=pytz.UTC).strftime('%Y-%m-%dT%H:%M:%S.%f%z')
+            'published': book.published.replace(tzinfo=pytz.UTC).strftime('%Y-%m-%dT%H:%M:%S.%f%z'),
+            'updated': book.updated.replace(tzinfo=pytz.UTC).strftime('%Y-%m-%dT%H:%M:%S.%f%z')
         })
 
         json.dumps(self.repo.denormalize(book))
