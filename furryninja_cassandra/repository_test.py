@@ -303,7 +303,7 @@ class TestCassandraRepository(unittest.TestCase):
         self.assertEqual(self.repo.session.execute.call_args_list[0], mock.call('SELECT * FROM edge WHERE indoc = %(indoc)s LIMIT 50', parameters={
             'indoc': image.key.urlsafe()
         }))
-        # self.assertEqual(self.repo.session.execute.call_args_list[1][0], ('DELETE FROM edge WHERE indoc IN %(indoc)s AND outdoc IN %(outdoc)s AND label IN %(label)s', ))
+        #self.assertEqual(self.repo.session.execute.call_args_list[1][0], ('DELETE FROM edge WHERE indoc IN %(indoc)s AND outdoc IN %(outdoc)s AND label IN %(label)s', ))
         # self.assertTrue(isinstance(self.repo.session.execute.call_args_list[1][1]['parameters']['indoc'], ValueSequence))
         # self.assertTrue(isinstance(self.repo.session.execute.call_args_list[1][1]['parameters']['outdoc'], ValueSequence))
         # self.assertTrue(isinstance(self.repo.session.execute.call_args_list[1][1]['parameters']['label'], ValueSequence))

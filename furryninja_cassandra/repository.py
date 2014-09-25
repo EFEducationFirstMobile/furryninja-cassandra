@@ -158,6 +158,8 @@ class CassandraRepository(Repository):
         if models:
             batch = BatchStatement()
             for edge in models:
+                if isinstance(edge, dict):
+                    edge = Edge(**edge)
                 cql_statement, condition_values = CassandraQuery(Edge.query(Edge.indoc == edge.indoc, Edge.outdoc == edge.outdoc, Edge.label == edge.label)).delete()
                 batch.add(cql_statement, parameters=condition_values)
 
