@@ -14,6 +14,7 @@ from furryninja.model import AttributesProperty, DateTimeProperty
 from furryninja.repository import Repository
 from furryninja import Settings, KeyProperty, Key, Model, StringProperty, QueryNotFoundException
 from .query import CassandraQuery
+from .exceptions import PrimaryKeyException
 import logging
 
 logger = logging.getLogger('cassandra.repo')
@@ -29,10 +30,33 @@ class Edge(Model):
 
 class CassandraRepository(Repository):
     def __init__(self, connection_class=Cluster):
-        cluster = connection_class(Settings.get('db.host'))
+        try:
+            port = int(Settings.get('db.port'))
+        except TypeError:
+            port = 9042
+
+        cluster = connection_class(contact_points=Settings.get('db.host'), port=port, protocol_version=1)
         cluster.set_core_connections_per_host(HostDistance.LOCAL, 10)
         self.session = cluster.connect(keyspace=Settings.get('db.name'))
         self.session.row_factory = ordered_dict_factory
+
+    def __get_table_metadata(self, table_name):
+        return self.session.cluster.metadata.keyspaces[Settings.get('db.name')].tables[table_name]
+
+    def __get_primary_key_fields(self, model):
+        metadata = self.__get_table_metadata(model.table())
+        return {}
+
+    def __construct_primary_key(self, model):
+        metadata = self.__get_table_metadata(model.table())
+        fields = {}
+        for key_part in metadata.primary_key:
+            if not hasattr(model, key_part.name):
+                raise PrimaryKeyException('Missing mandatory PRIMARY KEY part %r' % key_part.name)
+
+            fields[key_part.name] = '%s' % getattr(model, key_part.name)
+
+        return fields
 
     def denormalize(self, model):
         def get_value(attr):
@@ -181,13 +205,13 @@ class CassandraRepository(Repository):
 
         model_as_dict = self.denormalize(model)
         blob = json.dumps(model_as_dict)
-        fields = {
-            'key': model.key.urlsafe(),
-            'blob': blob
-        }
 
-        if hasattr(model, 'revision'):
-            fields.update({'revision': model.revision})
+        fields = self.__construct_primary_key(model)
+
+        # TODO: make configurable
+        fields.update({
+            'blob': blob
+        })
 
         cql_statement, condition_values = CassandraQuery.insert(model.table(), fields)
         self.session.execute(cql_statement, parameters=condition_values)

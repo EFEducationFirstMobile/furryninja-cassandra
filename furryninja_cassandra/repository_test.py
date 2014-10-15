@@ -1,18 +1,34 @@
-from collections import OrderedDict
 import copy
 import functools
 import json
-from string import lower
 import unittest
-from cassandra.query import ValueSequence
+import pkg_resources
+from pysandraunit.testcasebase import CassandraTestCaseBase
+from pysandraunit.testcasebase import CassandraTestCaseConfigException
 import mock
 import pytz
-from furryninja import KeyProperty, AttributesProperty, IntegerProperty, StringProperty, Model, Key, computed_property
+from furryninja import KeyProperty, AttributesProperty, IntegerProperty, StringProperty, Model, Key, key_ref
 from furryninja import QueryNotFoundException
 from .repository import CassandraRepository, Edge
 from furryninja.model import DateTimeProperty
+from furryninja import Settings
 
 __author__ = 'broken'
+
+
+class PYSANDRASettings:
+    PYSANDRA_SCHEMA_FILE_PATH = '/Users/broken/work/projects/furryninja-cassandra/test_config/cassandra.schema.cql'
+    PYSANDRA_TMP_DIR = '/tmp/cassandratmp'
+
+CassandraTestCaseBase.set_global_settings(PYSANDRASettings)
+
+
+Settings.set('db', {
+    'name': 'test_keyspace',
+    'port': '9142',
+    'host': ['localhost']
+})
+
 
 IMAGE_ASSET = {
     'name': 'Written speech',
@@ -74,20 +90,39 @@ class ImageAsset(Model):
     })
 
 
-class TestCassandraRepository(unittest.TestCase):
+class PrimaryKeyMixin(object):
+    @property
+    def kind(self):
+        return self.key.kind
+
+    @key_ref
+    def revision(self):
+        return '1'
+
+
+class Book(Model, PrimaryKeyMixin):
+    title = StringProperty()
+
+
+
+class TestCassandraRepository(CassandraTestCaseBase, unittest.TestCase):
     def setUp(self):
-        def conn(*args):
-            return mock.Mock(**{
-                'set_core_connections_per_host.return_value': None,
-                'connect.return_value': mock.Mock(**{
-                    'prepare.return_value': None,
-                    'execute.return_value': mock.Mock()
-                })
-            })
+        # def conn(*args):
+        #     return mock.Mock(**{
+        #         'set_core_connections_per_host.return_value': None,
+        #         'connect.return_value': mock.Mock(**{
+        #             'prepare.return_value': None,
+        #             'execute.return_value': mock.Mock()
+        #         })
+        #     })
+        #
+        # connection = functools.partial(conn)
 
-        connection = functools.partial(conn)
+        self._start_cassandra()
+        self.repo = CassandraRepository()
 
-        self.repo = CassandraRepository(connection_class=connection)
+    def tearDown(self):
+        self._clean_cassandra()
 
     def test_denormalize(self):
         image = ImageAsset(**copy.deepcopy(IMAGE_ASSET))
