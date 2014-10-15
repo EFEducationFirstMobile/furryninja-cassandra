@@ -8,7 +8,7 @@ import simplejson as json
 
 from cassandra.cluster import Cluster
 from cassandra.policies import HostDistance
-from cassandra.query import dict_factory, BatchStatement
+from cassandra.query import ordered_dict_factory, BatchStatement
 from furryninja.model import AttributesProperty, DateTimeProperty
 
 from furryninja.repository import Repository
@@ -32,7 +32,7 @@ class CassandraRepository(Repository):
         cluster = connection_class(Settings.get('db.host'))
         cluster.set_core_connections_per_host(HostDistance.LOCAL, 10)
         self.session = cluster.connect(keyspace=Settings.get('db.name'))
-        self.session.row_factory = dict_factory
+        self.session.row_factory = ordered_dict_factory
 
     def denormalize(self, model):
         def get_value(attr):
