@@ -30,14 +30,24 @@ class Edge(Model):
 
 class CassandraRepository(Repository):
     def __init__(self, connection_class=Cluster):
-        try:
-            port = int(Settings.get('db.port'))
-        except TypeError:
-            port = 9042
+        self.settings = dict(host='localhost', port=9042, protocol_version=2)
+        self.settings.update(Settings.get('db'))
 
-        cluster = connection_class(contact_points=Settings.get('db.host'), port=port, protocol_version=1)
+        assert self.settings.get('name', None), 'Missing required setting db.name'
+
+        if not isinstance(self.settings.get('port'), int):
+            self.settings['port'] = int(self.settings.get('port'))
+        if not isinstance(self.settings.get('protocol_version'), int):
+            self.settings['protocol_version'] = int(self.settings.get('protocol_version'))
+
+        cluster = connection_class(
+            contact_points=self.settings['host'],
+            port=self.settings['port'],
+            protocol_version=self.settings['protocol_version']
+        )
+
         cluster.set_core_connections_per_host(HostDistance.LOCAL, 10)
-        self.session = cluster.connect(keyspace=Settings.get('db.name'))
+        self.session = cluster.connect(keyspace=self.settings['name'])
         self.session.row_factory = ordered_dict_factory
 
     def __get_table_metadata(self, table_name):
@@ -45,7 +55,7 @@ class CassandraRepository(Repository):
 
     def __get_primary_key_fields(self, model):
         metadata = self.__get_table_metadata(model.table())
-        return {}
+        return [field.name for field in metadata.primary_key]
 
     def __construct_primary_key(self, model):
         metadata = self.__get_table_metadata(model.table())
@@ -155,7 +165,7 @@ class CassandraRepository(Repository):
         return result
 
     def get(self, model, fields=None):
-        query = model.query(model.__class__.key == model.key).limit(1)
+        query = model.query(*[getattr(model.__class__, field) == getattr(model, field) for field in self.__get_primary_key_fields(model)]).limit(1)
         cql_statement, condition_values = CassandraQuery(query).select()
         rows = self.session.execute(cql_statement, parameters=condition_values)
 
@@ -174,12 +184,12 @@ class CassandraRepository(Repository):
         existing_edges = self.session.execute(edge_cql_statement, parameters=condition_values)
         self.delete_edge(existing_edges)
 
-        query = model.query(model.__class__.key == model.key).limit(1000)
+        query = model.query(*[getattr(model.__class__, field) == getattr(model, field) for field in self.__get_primary_key_fields(model)]).limit(1)
         cql_statement, condition_values = CassandraQuery(query).delete()
         self.session.execute(cql_statement, parameters=condition_values)
 
     def delete_edge(self, models):
-        if models:
+        if models and self.settings['protocol_version'] >= 2:
             batch = BatchStatement()
             for edge in models:
                 if isinstance(edge, dict):
@@ -188,6 +198,12 @@ class CassandraRepository(Repository):
                 batch.add(cql_statement, parameters=condition_values)
 
             self.session.execute(batch)
+        elif models:
+            for edge in models:
+                if isinstance(edge, dict):
+                    edge = Edge(**edge)
+                cql_statement, condition_values = CassandraQuery(Edge.query(Edge.indoc == edge.indoc, Edge.outdoc == edge.outdoc, Edge.label == edge.label)).delete()
+                self.session.execute(cql_statement, parameters=condition_values)
 
     def insert_edge(self, model):
         cql_statement, condition_values = CassandraQuery.insert(Edge.table(), {

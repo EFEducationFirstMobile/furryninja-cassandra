@@ -1,23 +1,22 @@
 import copy
-import functools
 import json
 import unittest
-import pkg_resources
 from pysandraunit.testcasebase import CassandraTestCaseBase
-from pysandraunit.testcasebase import CassandraTestCaseConfigException
 import mock
 import pytz
 from furryninja import KeyProperty, AttributesProperty, IntegerProperty, StringProperty, Model, Key, key_ref
-from furryninja import QueryNotFoundException
-from .repository import CassandraRepository, Edge
 from furryninja.model import DateTimeProperty
 from furryninja import Settings
+from furryninja import QueryNotFoundException
+from furryninja_cassandra.query import CassandraQuery
+from .repository import CassandraRepository, Edge
+from .model import PrimaryKeyMixin
 
 __author__ = 'broken'
 
 
 class PYSANDRASettings:
-    PYSANDRA_SCHEMA_FILE_PATH = '/Users/broken/work/projects/furryninja-cassandra/test_config/cassandra.schema.cql'
+    PYSANDRA_SCHEMA_FILE_PATH = '/Users/broken/ef/development/furryninja-cassandra/test_config/cassandra.schema.cql'
     PYSANDRA_TMP_DIR = '/tmp/cassandratmp'
 
 CassandraTestCaseBase.set_global_settings(PYSANDRASettings)
@@ -26,7 +25,8 @@ CassandraTestCaseBase.set_global_settings(PYSANDRASettings)
 Settings.set('db', {
     'name': 'test_keyspace',
     'port': '9142',
-    'host': ['localhost']
+    'host': ['localhost'],
+    'protocol_version': 1
 })
 
 
@@ -42,15 +42,15 @@ IMAGE_ASSET = {
         'year': 2000
     },
     'topics': [
-        'G9dCxjCen-3J6OwdwAmD8pO'
+        'G9dCxjCen-oJMYWaN2vjn18'
     ],
     'attributes': {
         'imageFormat': [
-            'G9dCxjCen-3J6OwdwAmD8pO',
-            'G9dCxjCen-oJQxOYorByPjm'
+            'G9dCxjCen-4QD1ydlavEYj4',
+            'G9dCxjCen-P5Ep0LbmbM7yy'
         ],
         'imageType': [
-            'G9dCxjCen-3J6OwdwAmD8pO'
+            'G9dCxjCen-N5EXYgamnvPVn'
         ],
         'files': [{
             'url': 'http://goo.gl'
@@ -59,11 +59,11 @@ IMAGE_ASSET = {
 }
 
 
-class Tag(Model):
+class Tag(Model, PrimaryKeyMixin):
     title = StringProperty()
 
 
-class ImageAsset(Model):
+class ImageAsset(Model, PrimaryKeyMixin):
     default_fields = ['topics', 'attributes.imageFormat', 'attributes.imageType']
 
     title = StringProperty()
@@ -90,19 +90,8 @@ class ImageAsset(Model):
     })
 
 
-class PrimaryKeyMixin(object):
-    @property
-    def kind(self):
-        return self.key.kind
-
-    @key_ref
-    def revision(self):
-        return '1'
-
-
 class Book(Model, PrimaryKeyMixin):
     title = StringProperty()
-
 
 
 class TestCassandraRepository(CassandraTestCaseBase, unittest.TestCase):
@@ -147,23 +136,23 @@ class TestCassandraRepository(CassandraTestCaseBase, unittest.TestCase):
         image = ImageAsset(**copy.deepcopy(IMAGE_ASSET))
         expected = self.repo.find_edges(image)
 
-        self.assertEqual(expected[0].label, 'attributes.imageType')
+        self.assertEqual(expected[0].label, 'topics')
         self.assertEqual(expected[1].label, 'attributes.imageFormat')
-        self.assertEqual(expected[2].label, 'topics')
-        self.assertEqual(expected[3].label, 'attributes.imageFormat')
+        self.assertEqual(expected[2].label, 'attributes.imageFormat')
+        self.assertEqual(expected[3].label, 'attributes.imageType')
 
         duplicate_image_format = copy.deepcopy(IMAGE_ASSET)
         duplicate_image_format['attributes']['imageFormat'] = [
-            'G9dCxjCen-oJQxOYorByPjm',
-            'G9dCxjCen-oJQxOYorByPjm'
+            'G9dCxjCen-P5Ep0LbmbM7yy',
+            'G9dCxjCen-P5Ep0LbmbM7yy'
         ]
 
         image = ImageAsset(**duplicate_image_format)
         expected = self.repo.find_edges(image)
 
-        self.assertEqual(expected[0].label, 'attributes.imageType')
-        self.assertEqual(expected[1].label, 'topics')
-        self.assertEqual(expected[2].label, 'attributes.imageFormat')
+        self.assertEqual(expected[0].label, 'topics')
+        self.assertEqual(expected[1].label, 'attributes.imageFormat')
+        self.assertEqual(expected[2].label, 'attributes.imageType')
 
     def test_find_edges_with_complex_model(self):
         class Entity(Model):
@@ -182,7 +171,11 @@ class TestCassandraRepository(CassandraTestCaseBase, unittest.TestCase):
         edges = self.repo.find_edges(image)
 
         self.repo.set_edges_for_model(image, edges)
-        self.assertEqual(self.repo.session.execute.call_count, 4)
+
+        cql_edges = self.repo.fetch(Edge.query())
+        self.assertEqual(len(cql_edges), 4)
+        self.assertEqual(cql_edges[0].indoc.urlsafe(), image.key.urlsafe())
+        self.assertEqual(cql_edges[0].outdoc.urlsafe(), 'G9dCxjCen-4QD1ydlavEYj4')
 
         with mock.patch.object(self.repo, 'insert_edge') as insert_edge:
             self.repo.set_edges_for_model(image, edges)
@@ -194,103 +187,70 @@ class TestCassandraRepository(CassandraTestCaseBase, unittest.TestCase):
     def test_create_model(self):
         image = ImageAsset(**copy.deepcopy(IMAGE_ASSET))
 
+        cql_statement, condition_values = CassandraQuery.insert(image.table(), {'blob': '<--blob-->', 'key': '<--key-->'})
+        self.assertEqual(cql_statement, 'INSERT INTO imageasset (blob, key) VALUES (%(blob)s, %(key)s)')
+
         self.repo.insert(image)
         self.maxDiff = None
-        self.assertEqual(self.repo.session.execute.call_count, 5)
-        self.assertEqual(self.repo.session.execute.call_args_list[0], mock.call('INSERT INTO imageasset (blob, key) VALUES (%(blob)s, %(key)s)', parameters={
-            'key': image.key.urlsafe(),
-            'blob': json.dumps(self.repo.denormalize(image))
-        }))
+
+        entities = self.repo.fetch(image.query())
+        self.assertEqual(len(entities), 1)
 
     def test_get_model(self):
-        class Entity(Model):
-            title = StringProperty()
-            description = StringProperty()
+        en = Book(**{
+            'title': 'Lorem ipsum'
+        })
 
-        en = Entity()
-        en_str_key = en.key.urlsafe()
-        self.repo.session.execute.side_effect = [
-            [
-                {
-                    'key': en_str_key,
-                    'title': 'Lorem ipsum',
-                    'description': 'Lorem ipsum'
-                }
-            ]
-        ]
+        query = en.query(en.__class__.key == en.key).limit(1)
+        cql_statement, condition_values = CassandraQuery(query).select()
+        self.assertEqual(cql_statement, 'SELECT * FROM book WHERE key = %(key)s LIMIT 1')
+
+        self.repo.insert(en)
+        self.maxDiff = None
 
         fetched_entity = self.repo.get(en)
 
         self.assertEqual(fetched_entity.title, 'Lorem ipsum')
-        self.assertEqual(self.repo.session.execute.call_count, 1)
-        self.assertEqual(self.repo.session.execute.call_args_list[0], mock.call('SELECT * FROM entity WHERE key = %(key)s LIMIT 1', parameters={
-            'key': en.key.urlsafe()
-        }))
 
     def test_get_not_found_model(self):
-        class Entity(Model):
-            title = StringProperty()
-            description = StringProperty()
-
-        en = Entity()
-        self.repo.session.execute.side_effect = [
-            []
-        ]
+        en = Book()
 
         with self.assertRaises(QueryNotFoundException):
             self.repo.get(en)
 
     def test_get_model_with_blob(self):
-        tag = [{
+        tag = Tag(**{
+            'key': 'G9dCxjCen-oJMYWaN2vjn18',
             'title': 'Hello, earth!'
-        }]
+        })
 
-        image = ImageAsset()
-        self.repo.session.execute.side_effect = [
-            [
-                {
-                    'key': 'DD0H97clzCKLuQXSe9cLEHgrH5KI9Q-kPeweAB1D1Y5l',
-                    'blob': json.dumps(IMAGE_ASSET)
-                }
-            ],
-            tag,
-            tag,
-            tag,
-            tag
-        ]
+        self.repo.insert(tag)
 
-        self.repo.get(image)
-        self.maxDiff = None
-        self.assertEqual(self.repo.session.execute.call_count, 5)
-        self.assertEqual(self.repo.session.execute.call_args_list[0], mock.call('SELECT * FROM imageasset WHERE key = %(key)s LIMIT 1', parameters={
-            'key': image.key.urlsafe()
-        }))
+        image = ImageAsset(**copy.deepcopy(IMAGE_ASSET))
+        self.repo.insert(image)
+
+        image = self.repo.get(image)
+        self.assertEqual(image.topics[0].title, 'Hello, earth!')
 
     def test_update_model(self):
         image = ImageAsset(**copy.deepcopy(IMAGE_ASSET))
-        self.repo.session.execute.side_effect = [
-            True,
-            [],
-            True,
-            True,
-            True,
-            True
-        ]
+        self.repo.insert(image)
 
+        self.assertEqual(image.title, 'Lorem Ipsum')
+        image.title = 'Hello, earth!'
         self.repo.update(image)
-        self.maxDiff = None
-        self.assertEqual(self.repo.session.execute.call_count, 6)
-        self.assertEqual(self.repo.session.execute.call_args_list[0], mock.call('UPDATE imageasset SET blob = %(blob)s WHERE key = %(key)s', parameters={
-            'key': image.key.urlsafe(),
-            'blob': json.dumps(self.repo.denormalize(image))
-        }))
+
+        updated_image = self.repo.get(image)
+        self.assertEqual(updated_image.title, 'Hello, earth!')
 
     def test_update_edges(self):
         image = ImageAsset(**copy.deepcopy(IMAGE_ASSET))
 
         edges = self.repo.find_edges(image)
         self.repo.set_edges_for_model(image, edges, [])
-        self.assertEqual(self.repo.session.execute.call_count, 4)
+
+        cql_edges = self.repo.fetch(Edge.query())
+        self.assertEqual(len(cql_edges), 4)
 
         # Remove one will result in no new edges and one delete. So total call count should be 5
         removed_edge = image.attributes.imageFormat.pop()
@@ -304,121 +264,83 @@ class TestCassandraRepository(CassandraTestCaseBase, unittest.TestCase):
         edges = self.repo.find_edges(image)
 
         self.repo.set_edges_for_model(image, edges, existing_edges)
-        self.assertEqual(self.repo.session.execute.call_count, 5)
+        cql_edges = self.repo.fetch(Edge.query())
+        self.assertEqual(len(cql_edges), 3)
 
-        # self.assertEqual(self.repo.session.execute.call_args[0], ('DELETE FROM edge WHERE indoc IN %(indoc)s AND outdoc IN %(outdoc)s AND label IN %(label)s', ))
-        # self.assertTrue(isinstance(self.repo.session.execute.call_args[1]['parameters']['indoc'], ValueSequence))
-        # self.assertTrue(isinstance(self.repo.session.execute.call_args[1]['parameters']['outdoc'], ValueSequence))
-        # self.assertTrue(isinstance(self.repo.session.execute.call_args[1]['parameters']['label'], ValueSequence))
-
-        # Adding one will result in 1 new edges and 0 delete. So total call count should be 6
+        # Adding one will result in 1 new edges and 0 delete.
         image.attributes.imageFormat.append(removed_edge)
         existing_edges = edges
         edges = self.repo.find_edges(image)
 
         self.repo.set_edges_for_model(image, edges, existing_edges)
-        self.assertEqual(self.repo.session.execute.call_count, 6)
+        cql_edges = self.repo.fetch(Edge.query())
+        self.assertEqual(len(cql_edges), 4)
 
     def test_delete_model(self):
         image = ImageAsset(**copy.deepcopy(IMAGE_ASSET))
+        self.repo.insert(image)
 
-        edges = self.repo.find_edges(image)
+        entities = self.repo.fetch(image.query())
+        self.assertEqual(len(entities), 1)
 
-        self.repo.session.execute.return_value = [
-            Edge(**{
-                'key': 'EJLCVyC5AUEQ-AxpVmA5oQwRWZ',
-                'label': edges[-1].label,
-                'outdoc': edges[-1].outdoc
-            })
-        ]
+        cql_edges = self.repo.fetch(Edge.query())
+        self.assertEqual(len(cql_edges), 4)
 
         self.repo.delete(image)
-        self.maxDiff = None
-        self.assertEqual(self.repo.session.execute.call_count, 3)
-        self.assertEqual(self.repo.session.execute.call_args_list[0], mock.call('SELECT * FROM edge WHERE indoc = %(indoc)s LIMIT 50', parameters={
-            'indoc': image.key.urlsafe()
-        }))
-        #self.assertEqual(self.repo.session.execute.call_args_list[1][0], ('DELETE FROM edge WHERE indoc IN %(indoc)s AND outdoc IN %(outdoc)s AND label IN %(label)s', ))
-        # self.assertTrue(isinstance(self.repo.session.execute.call_args_list[1][1]['parameters']['indoc'], ValueSequence))
-        # self.assertTrue(isinstance(self.repo.session.execute.call_args_list[1][1]['parameters']['outdoc'], ValueSequence))
-        # self.assertTrue(isinstance(self.repo.session.execute.call_args_list[1][1]['parameters']['label'], ValueSequence))
-        self.assertEqual(self.repo.session.execute.call_args_list[2], mock.call('DELETE FROM imageasset WHERE key = %(key)s', parameters={
-            'key': image.key.urlsafe()
-        }))
+
+        entities = self.repo.fetch(image.query())
+        self.assertEqual(len(entities), 0)
+
+        cql_edges = self.repo.fetch(Edge.query())
+        self.assertEqual(len(cql_edges), 0)
 
     def test_fetch_query(self):
-        tag = [{
-            'title': 'Hello, earth!'
-        }]
+        image1 = ImageAsset(**{'title': 'title1'})
+        image2 = ImageAsset(**{'title': 'title2'})
+        image3 = ImageAsset(**{'title': 'title3'})
+        self.repo.insert(image1)
+        self.repo.insert(image2)
+        self.repo.insert(image3)
 
-        qry = ImageAsset.query()
-        self.repo.session.execute.side_effect = [
-            [
-                {
-                    'key': 'DD0H97clzCKLuQXSe9cLEHgrH5KI9Q-kPeweAB1D1Y5l',
-                    'blob': json.dumps(IMAGE_ASSET)
-                },
-                {
-                    'key': 'DD0H97clzCKLuQXSe9cLEHgrH5KI9Q-kPeweAB1D1Y5l',
-                    'blob': json.dumps(IMAGE_ASSET)
-                }
-            ],
-            tag,
-            tag,
-            tag,
-            tag,
-            tag,
-            tag,
-            tag,
-            tag
-        ]
+        entities = self.repo.fetch(ImageAsset.query())
+        self.assertEqual(len(entities), 3)
 
-        self.repo.fetch(qry)
-
-        self.assertEqual(self.repo.session.execute.call_count, 9)
-        self.assertEqual(self.repo.session.execute.call_args_list[0][0], ('SELECT * FROM imageasset LIMIT 50', ))
+        entities = self.repo.fetch(ImageAsset.query().limit(1))
+        self.assertEqual(len(entities), 1)
 
     def test_model_pre_put_hook(self):
-        class VideoAsset(Model):
+        class ImageAsset(Model, PrimaryKeyMixin):
             music = 'rock'
 
             def _pre_put_hook(self):
                 self.music = 'metal'
 
-        video = VideoAsset()
+        video = ImageAsset()
         self.assertEqual(video.music, 'rock')
         self.repo.insert(video)
         self.assertEqual(video.music, 'metal')
 
-        video2 = VideoAsset()
+        video2 = ImageAsset()
         self.assertEqual(video2.music, 'rock')
-        self.repo.session.execute.side_effect = [
-            True,
-            []
-        ]
+
         self.repo.update(video2)
         self.assertEqual(video2.music, 'metal')
 
     def test_model_post_put_hook(self):
 
-        class VideoAsset(Model):
+        class ImageAsset(Model, PrimaryKeyMixin):
             music = 'rock'
 
             def _post_put_hook(self):
                 self.music = 'metal'
 
-        video = VideoAsset()
+        video = ImageAsset()
         self.assertEqual(video.music, 'rock')
         self.repo.insert(video)
         self.assertEqual(video.music, 'metal')
 
-        video2 = VideoAsset()
+        video2 = ImageAsset()
         self.assertEqual(video2.music, 'rock')
-
-        self.repo.session.execute.side_effect = [
-            True,
-            []
-        ]
 
         self.repo.update(video2)
         self.assertEqual(video2.music, 'metal')

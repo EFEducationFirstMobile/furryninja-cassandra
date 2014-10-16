@@ -17,7 +17,8 @@ setup(
         'cassandra-driver',
         'cql',
         'blist',
-        'furryninja'
+        'furryninja',
+        'pysandra-unit'
     ],
     dependency_links=[
         'https://github.com/EFEducationFirstMobile/furry-ninja/tarball/master#egg=furryninja'
