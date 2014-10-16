@@ -1,25 +1,26 @@
 # -*- coding: utf-8 -*-
 from itertools import ifilter
-from string import lower
 import datetime
 import pytz
-
-import simplejson as json
+import logging
 
 from cassandra.cluster import Cluster
 from cassandra.policies import HostDistance
-from cassandra.query import dict_factory, BatchStatement
+from cassandra.query import ordered_dict_factory, BatchStatement
 from furryninja.model import AttributesProperty, DateTimeProperty
 
 from furryninja.repository import Repository
 from furryninja import Settings, KeyProperty, Key, Model, StringProperty, QueryNotFoundException
+from .model import CassandraModelMixin
 from .query import CassandraQuery
-import logging
+from .exceptions import PrimaryKeyException, ModelValidationException
 
 logger = logging.getLogger('cassandra.repo')
 
 
-class Edge(Model):
+class Edge(Model, CassandraModelMixin):
+    _storage_type = ('simple',)
+
     label = StringProperty()
     indoc = KeyProperty()
     outdoc = KeyProperty()
@@ -29,12 +30,51 @@ class Edge(Model):
 
 class CassandraRepository(Repository):
     def __init__(self, connection_class=Cluster):
-        cluster = connection_class(Settings.get('db.host'))
-        cluster.set_core_connections_per_host(HostDistance.LOCAL, 10)
-        self.session = cluster.connect(keyspace=Settings.get('db.name'))
-        self.session.row_factory = dict_factory
+        self.settings = dict(host='localhost', port=9042, protocol_version=2)
+        self.settings.update(Settings.get('db'))
 
-    def denormalize(self, model):
+        assert self.settings.get('name', None), 'Missing required setting db.name'
+
+        if not isinstance(self.settings.get('port'), int):
+            self.settings['port'] = int(self.settings.get('port'))
+        if not isinstance(self.settings.get('protocol_version'), int):
+            self.settings['protocol_version'] = int(self.settings.get('protocol_version'))
+
+        cluster = connection_class(
+            contact_points=self.settings['host'],
+            port=self.settings['port'],
+            protocol_version=self.settings['protocol_version']
+        )
+
+        cluster.set_core_connections_per_host(HostDistance.LOCAL, 10)
+        self.session = cluster.connect(keyspace=self.settings['name'])
+        self.session.row_factory = ordered_dict_factory
+
+    def __get_table_metadata(self, table_name):
+        return self.session.cluster.metadata.keyspaces[Settings.get('db.name')].tables[table_name]
+
+    def __get_primary_key_fields(self, model):
+        metadata = self.__get_table_metadata(model.table())
+        return [field.name for field in metadata.primary_key]
+
+    def __construct_primary_key(self, model):
+        metadata = self.__get_table_metadata(model.table())
+        fields = {}
+        for key_part in metadata.primary_key:
+            if not hasattr(model, key_part.name):
+                raise PrimaryKeyException('Missing mandatory PRIMARY KEY part %r' % key_part.name)
+
+            fields[key_part.name] = '%s' % getattr(model, key_part.name)
+
+        return fields
+
+    @staticmethod
+    def __validate_model(model):
+        if not isinstance(model, CassandraModelMixin):
+            raise ModelValidationException('Expected model to be an instance of CassandraModelMixin, got %r' % model)
+
+    @staticmethod
+    def denormalize(model):
         def get_value(attr):
             attr_value = attr or None
             if isinstance(attr, (KeyProperty, Key)):
@@ -64,7 +104,7 @@ class CassandraRepository(Repository):
                 serialized_node[name] = value
             return serialized_node
 
-        serialized = serialize_keys(model.entity_to_db())
+        serialized = serialize_keys(model._storage_type_to_db())
         return serialized
 
     def set_edges_for_model(self, model, new_edges=None, existing_edges=None):
@@ -123,39 +163,44 @@ class CassandraRepository(Repository):
         rows = self.session.execute(cql_statement, parameters=condition_values)
 
         for row in rows:
-            model_data = json.loads(row['blob']) if row.get('blob', None) else row
             model_cls = Model._lookup_model(Key.from_string(row['key']).kind)
+            model_data = model_cls._db_to_storage_type(row)
             model = model_cls(**model_data)
             self.resolve_referenced_keys(model, fields=fields)
             result.append(model)
         return result
 
     def get(self, model, fields=None):
-        query = model.query(model.__class__.key == model.key).limit(1)
+        self.__validate_model(model)
+
+        query = model.query(*[getattr(model.__class__, field) == getattr(model, field) for field in self.__get_primary_key_fields(model)]).limit(1)
         cql_statement, condition_values = CassandraQuery(query).select()
         rows = self.session.execute(cql_statement, parameters=condition_values)
 
         if not rows:
             raise QueryNotFoundException
 
-        model_data = json.loads(rows[0]['blob']) if rows[0].get('blob', None) else rows[0]
+        row = rows[0]
+        model_data = model.__class__._db_to_storage_type(row)
         model.populate(**model_data)
         self.resolve_referenced_keys(model, fields=fields)
         return model
 
     def delete(self, model):
+        self.__validate_model(model)
+
         edge_query = Edge.query(Edge.indoc == model.key)
         edge_cql_statement, condition_values = CassandraQuery(edge_query).select()
 
         existing_edges = self.session.execute(edge_cql_statement, parameters=condition_values)
         self.delete_edge(existing_edges)
 
-        query = model.query(model.__class__.key == model.key).limit(1000)
+        query = model.query(*[getattr(model.__class__, field) == getattr(model, field) for field in self.__get_primary_key_fields(model)]).limit(1)
         cql_statement, condition_values = CassandraQuery(query).delete()
         self.session.execute(cql_statement, parameters=condition_values)
 
     def delete_edge(self, models):
-        if models:
+        if models and self.settings['protocol_version'] >= 2:
             batch = BatchStatement()
             for edge in models:
                 if isinstance(edge, dict):
@@ -164,6 +209,12 @@ class CassandraRepository(Repository):
                 batch.add(cql_statement, parameters=condition_values)
 
             self.session.execute(batch)
+        elif models:
+            for edge in models:
+                if isinstance(edge, dict):
+                    edge = Edge(**edge)
+                cql_statement, condition_values = CassandraQuery(Edge.query(Edge.indoc == edge.indoc, Edge.outdoc == edge.outdoc, Edge.label == edge.label)).delete()
+                self.session.execute(cql_statement, parameters=condition_values)
 
     def insert_edge(self, model):
         cql_statement, condition_values = CassandraQuery.insert(Edge.table(), {
@@ -176,18 +227,12 @@ class CassandraRepository(Repository):
         self.session.execute(cql_statement, parameters=condition_values)
 
     def insert(self, model):
-        assert isinstance(model, Model), 'Expected a Model instance, got %r' % model
+        self.__validate_model(model)
+
         model._pre_put_hook()
 
-        model_as_dict = self.denormalize(model)
-        blob = json.dumps(model_as_dict)
-        fields = {
-            'key': model.key.urlsafe(),
-            'blob': blob
-        }
-
-        if hasattr(model, 'revision'):
-            fields.update({'revision': model.revision})
+        fields = self.denormalize(model)
+        fields.update(self.__construct_primary_key(model))
 
         cql_statement, condition_values = CassandraQuery.insert(model.table(), fields)
         self.session.execute(cql_statement, parameters=condition_values)
@@ -200,18 +245,18 @@ class CassandraRepository(Repository):
         return model
 
     def update(self, model):
-        assert isinstance(model, Model), 'Expected a Model instance, got %r' % model
+        self.__validate_model(model)
+
         model._pre_put_hook()
 
-        model_as_dict = self.denormalize(model)
-        blob = json.dumps(model_as_dict)
-        fields = {
-            'blob': blob
-        }
+        fields = self.denormalize(model)
+        where = []
+        for field in self.__get_primary_key_fields(model):
+            if field in fields:
+                del fields[field]
 
-        where = [model.__class__.key == model.key]
-        if hasattr(model, 'revision'):
-            where.append(model.__class__.revision == model.revision)
+            where.append(getattr(model.__class__, field) == getattr(model, field))
+        assert fields.keys(), 'Model has no properties.'
 
         cql_statement, condition_values = CassandraQuery.update(model.table(), fields, where)
         self.session.execute(cql_statement, parameters=condition_values)
