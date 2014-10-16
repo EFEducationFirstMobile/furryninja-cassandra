@@ -1,10 +1,8 @@
 # -*- coding: utf-8 -*-
 from itertools import ifilter
-from string import lower
 import datetime
 import pytz
-
-import simplejson as json
+import logging
 
 from cassandra.cluster import Cluster
 from cassandra.policies import HostDistance
@@ -13,14 +11,16 @@ from furryninja.model import AttributesProperty, DateTimeProperty
 
 from furryninja.repository import Repository
 from furryninja import Settings, KeyProperty, Key, Model, StringProperty, QueryNotFoundException
+from .model import CassandraModelMixin
 from .query import CassandraQuery
-from .exceptions import PrimaryKeyException
-import logging
+from .exceptions import PrimaryKeyException, ModelValidationException
 
 logger = logging.getLogger('cassandra.repo')
 
 
-class Edge(Model):
+class Edge(Model, CassandraModelMixin):
+    _storage_type = ('simple',)
+
     label = StringProperty()
     indoc = KeyProperty()
     outdoc = KeyProperty()
@@ -68,7 +68,13 @@ class CassandraRepository(Repository):
 
         return fields
 
-    def denormalize(self, model):
+    @staticmethod
+    def __validate_model(model):
+        if not isinstance(model, CassandraModelMixin):
+            raise ModelValidationException('Expected model to be an instance of CassandraModelMixin, got %r' % model)
+
+    @staticmethod
+    def denormalize(model):
         def get_value(attr):
             attr_value = attr or None
             if isinstance(attr, (KeyProperty, Key)):
@@ -98,7 +104,7 @@ class CassandraRepository(Repository):
                 serialized_node[name] = value
             return serialized_node
 
-        serialized = serialize_keys(model.entity_to_db())
+        serialized = serialize_keys(model._storage_type_to_db())
         return serialized
 
     def set_edges_for_model(self, model, new_edges=None, existing_edges=None):
@@ -157,14 +163,16 @@ class CassandraRepository(Repository):
         rows = self.session.execute(cql_statement, parameters=condition_values)
 
         for row in rows:
-            model_data = json.loads(row['blob']) if row.get('blob', None) else row
             model_cls = Model._lookup_model(Key.from_string(row['key']).kind)
+            model_data = model_cls._db_to_storage_type(row)
             model = model_cls(**model_data)
             self.resolve_referenced_keys(model, fields=fields)
             result.append(model)
         return result
 
     def get(self, model, fields=None):
+        self.__validate_model(model)
+
         query = model.query(*[getattr(model.__class__, field) == getattr(model, field) for field in self.__get_primary_key_fields(model)]).limit(1)
         cql_statement, condition_values = CassandraQuery(query).select()
         rows = self.session.execute(cql_statement, parameters=condition_values)
@@ -172,12 +180,15 @@ class CassandraRepository(Repository):
         if not rows:
             raise QueryNotFoundException
 
-        model_data = json.loads(rows[0]['blob']) if rows[0].get('blob', None) else rows[0]
+        row = rows[0]
+        model_data = model.__class__._db_to_storage_type(row)
         model.populate(**model_data)
         self.resolve_referenced_keys(model, fields=fields)
         return model
 
     def delete(self, model):
+        self.__validate_model(model)
+
         edge_query = Edge.query(Edge.indoc == model.key)
         edge_cql_statement, condition_values = CassandraQuery(edge_query).select()
 
@@ -216,18 +227,12 @@ class CassandraRepository(Repository):
         self.session.execute(cql_statement, parameters=condition_values)
 
     def insert(self, model):
-        assert isinstance(model, Model), 'Expected a Model instance, got %r' % model
+        self.__validate_model(model)
+
         model._pre_put_hook()
 
-        model_as_dict = self.denormalize(model)
-        blob = json.dumps(model_as_dict)
-
-        fields = self.__construct_primary_key(model)
-
-        # TODO: make configurable
-        fields.update({
-            'blob': blob
-        })
+        fields = self.denormalize(model)
+        fields.update(self.__construct_primary_key(model))
 
         cql_statement, condition_values = CassandraQuery.insert(model.table(), fields)
         self.session.execute(cql_statement, parameters=condition_values)
@@ -240,18 +245,18 @@ class CassandraRepository(Repository):
         return model
 
     def update(self, model):
-        assert isinstance(model, Model), 'Expected a Model instance, got %r' % model
+        self.__validate_model(model)
+
         model._pre_put_hook()
 
-        model_as_dict = self.denormalize(model)
-        blob = json.dumps(model_as_dict)
-        fields = {
-            'blob': blob
-        }
+        fields = self.denormalize(model)
+        where = []
+        for field in self.__get_primary_key_fields(model):
+            if field in fields:
+                del fields[field]
 
-        where = [model.__class__.key == model.key]
-        if hasattr(model, 'revision'):
-            where.append(model.__class__.revision == model.revision)
+            where.append(getattr(model.__class__, field) == getattr(model, field))
+        assert fields.keys(), 'Model has no properties.'
 
         cql_statement, condition_values = CassandraQuery.update(model.table(), fields, where)
         self.session.execute(cql_statement, parameters=condition_values)

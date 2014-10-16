@@ -10,7 +10,7 @@ from furryninja import Settings
 from furryninja import QueryNotFoundException
 from furryninja_cassandra.query import CassandraQuery
 from .repository import CassandraRepository, Edge
-from .model import PrimaryKeyMixin
+from .model import CassandraModelMixin
 
 __author__ = 'broken'
 
@@ -59,11 +59,23 @@ IMAGE_ASSET = {
 }
 
 
-class Tag(Model, PrimaryKeyMixin):
+class TestModelMixin(CassandraModelMixin):
+    _storage_type = ('json', 'blob')
+
+    @key_ref
+    def kind(self):
+        return self.key.kind
+
+    @key_ref
+    def revision(self):
+        return '1'
+
+
+class Tag(Model, TestModelMixin):
     title = StringProperty()
 
 
-class ImageAsset(Model, PrimaryKeyMixin):
+class ImageAsset(Model, TestModelMixin):
     default_fields = ['topics', 'attributes.imageFormat', 'attributes.imageType']
 
     title = StringProperty()
@@ -90,22 +102,22 @@ class ImageAsset(Model, PrimaryKeyMixin):
     })
 
 
-class Book(Model, PrimaryKeyMixin):
+class Book(Model, TestModelMixin):
     title = StringProperty()
+    published = DateTimeProperty(auto_now_add=True)
+    updated = DateTimeProperty(auto_now=True)
+
+
+class VideoAsset(Model, CassandraModelMixin):
+    title = StringProperty(default='monkey')
+    music = 'rock'
+
+    def _pre_put_hook(self):
+        self.music = 'metal'
 
 
 class TestCassandraRepository(CassandraTestCaseBase, unittest.TestCase):
     def setUp(self):
-        # def conn(*args):
-        #     return mock.Mock(**{
-        #         'set_core_connections_per_host.return_value': None,
-        #         'connect.return_value': mock.Mock(**{
-        #             'prepare.return_value': None,
-        #             'execute.return_value': mock.Mock()
-        #         })
-        #     })
-        #
-        # connection = functools.partial(conn)
 
         self._start_cassandra()
         self.repo = CassandraRepository()
@@ -116,10 +128,10 @@ class TestCassandraRepository(CassandraTestCaseBase, unittest.TestCase):
     def test_denormalize(self):
         image = ImageAsset(**copy.deepcopy(IMAGE_ASSET))
         expected = dict(IMAGE_ASSET.items() + {'key': image.key.urlsafe()}.items())
-        self.assertDictEqual(self.repo.denormalize(image), expected)
+        self.assertDictEqual(json.loads(self.repo.denormalize(image)['blob']), expected)
 
     def test_denormalize_with_date(self):
-        class Book(Model):
+        class Book(Model, CassandraModelMixin):
             published = DateTimeProperty(auto_now_add=True)
             updated = DateTimeProperty(auto_now=True)
 
@@ -309,37 +321,24 @@ class TestCassandraRepository(CassandraTestCaseBase, unittest.TestCase):
         self.assertEqual(len(entities), 1)
 
     def test_model_pre_put_hook(self):
-        class ImageAsset(Model, PrimaryKeyMixin):
-            music = 'rock'
-
-            def _pre_put_hook(self):
-                self.music = 'metal'
-
-        video = ImageAsset()
+        video = VideoAsset(**{'title': 'monkey'})
         self.assertEqual(video.music, 'rock')
         self.repo.insert(video)
         self.assertEqual(video.music, 'metal')
 
-        video2 = ImageAsset()
+        video2 = VideoAsset(**{'title': 'monkey'})
         self.assertEqual(video2.music, 'rock')
 
         self.repo.update(video2)
         self.assertEqual(video2.music, 'metal')
 
     def test_model_post_put_hook(self):
-
-        class ImageAsset(Model, PrimaryKeyMixin):
-            music = 'rock'
-
-            def _post_put_hook(self):
-                self.music = 'metal'
-
-        video = ImageAsset()
+        video = VideoAsset(**{'title': 'monkey'})
         self.assertEqual(video.music, 'rock')
         self.repo.insert(video)
         self.assertEqual(video.music, 'metal')
 
-        video2 = ImageAsset()
+        video2 = VideoAsset(**{'title': 'monkey'})
         self.assertEqual(video2.music, 'rock')
 
         self.repo.update(video2)

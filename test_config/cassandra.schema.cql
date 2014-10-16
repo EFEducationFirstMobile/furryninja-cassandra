@@ -26,7 +26,15 @@ create table imageasset (
   blob varchar,
   create_date timestamp,
   last_update timestamp,
-  primary key (key,  revision)
+  primary key (key, revision)
+);
+
+create table videoasset (
+  key varchar,
+  title varchar,
+  create_date timestamp,
+  last_update timestamp,
+  primary key (key)
 );
 
 
