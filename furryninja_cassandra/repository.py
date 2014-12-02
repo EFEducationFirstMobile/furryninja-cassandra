@@ -104,8 +104,10 @@ class CassandraRepository(Repository):
                 serialized_node[name] = value
             return serialized_node
 
-        serialized = serialize_keys(model._storage_type_to_db())
-        return serialized
+        if hasattr(model, '_storage_type_to_db') and callable(getattr(model, '_storage_type_to_db')):
+            return model._storage_type_to_db(serialize_fn=serialize_keys)
+
+        return serialize_keys(model.entity_to_db())
 
     def set_edges_for_model(self, model, new_edges=None, existing_edges=None):
         assert new_edges

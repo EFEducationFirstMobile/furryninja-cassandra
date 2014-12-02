@@ -130,6 +130,13 @@ class TestCassandraRepository(CassandraTestCaseBase, unittest.TestCase):
         expected = dict(IMAGE_ASSET.items() + {'key': image.key.urlsafe()}.items())
         self.assertDictEqual(json.loads(self.repo.denormalize(image)['blob']), expected)
 
+    def test_denormalize_with_model(self):
+        tag = Tag(**{'title': 'A Tag'})
+        image = ImageAsset(**{'name': 'Monkey', 'topics': [tag]})
+
+        expected = dict({'name': 'Monkey', 'key': image.key.urlsafe(), 'topics': [tag.key.urlsafe()]}.items())
+        self.assertDictEqual(json.loads(self.repo.denormalize(image)['blob']), expected)
+
     def test_denormalize_with_date(self):
         class Book(Model, CassandraModelMixin):
             published = DateTimeProperty(auto_now_add=True)
