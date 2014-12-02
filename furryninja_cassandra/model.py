@@ -24,18 +24,24 @@ json_encoder = ModelJsonEncoder()
 class CassandraModelMixin(object):
     _storage_type = ('simple', )
 
-    def _storage_type_to_db(self):
+    def _storage_type_to_db(self, serialize_fn=None):
         assert self._storage_type[0] in ['simple', 'json'], '_storage_type must be an iterable with a first element of "simple" or "json"'
 
         if self._storage_type[0] == 'json':
             assert self._storage_type[1], '_storage_type second element must a string'
 
-            model = self.entity_to_db()
+            if callable(serialize_fn):
+                model = serialize_fn(self.entity_to_db())
+            else:
+                model = self.entity_to_db()
             return {
                 self._storage_type[1]: json_encoder.encode(model)
             }
 
-        return self.entity_to_db()
+        if callable(serialize_fn):
+            return serialize_fn(self.entity_to_db())
+        else:
+            return self.entity_to_db()
 
     @classmethod
     def _db_to_storage_type(cls, row):
