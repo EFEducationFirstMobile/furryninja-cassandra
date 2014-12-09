@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from itertools import ifilter
 import datetime
+
 import pytz
 import logging
 
@@ -16,6 +17,13 @@ from .query import CassandraQuery
 from .exceptions import PrimaryKeyException, ModelValidationException
 
 logger = logging.getLogger('cassandra.repo')
+LIBEV = False
+
+try:
+    from cassandra.io.libevreactor import LibevConnection
+    LIBEV = True
+except ImportError:
+    logger.warn('Not using libev, this is bad. Install it!!')
 
 
 class Edge(Model, CassandraModelMixin):
@@ -47,6 +55,9 @@ class CassandraRepository(Repository):
         )
 
         cluster.set_core_connections_per_host(HostDistance.LOCAL, 10)
+        if LIBEV:
+            cluster.connection_class = LibevConnection
+
         self.session = cluster.connect(keyspace=self.settings['name'])
         self.session.row_factory = ordered_dict_factory
 
