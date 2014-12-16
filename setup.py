@@ -21,6 +21,6 @@ setup(
         'pysandra-unit'
     ],
     dependency_links=[
-        'https://github.com/EFEducationFirstMobile/furry-ninja/tarball/master#egg=furryninja-0.1.16'
+        'https://github.com/EFEducationFirstMobile/furry-ninja/tarball/feat/gevent#egg=furryninja-0.1.16'
     ]
 )
