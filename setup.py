@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name='furryninja_cassandra',
-    version='0.3.1',
+    version='0.3.2',
     packages=[
         'furryninja_cassandra',
     ],
@@ -17,10 +17,10 @@ setup(
         'cassandra-driver',
         'cql',
         'blist',
-        'furryninja==0.3.0',
+        'furryninja==0.3.1',
         'pysandra-unit'
     ],
     dependency_links=[
-        'https://github.com/EFEducationFirstMobile/furry-ninja/tarball/master#egg=furryninja-0.3.0'
+        'https://github.com/EFEducationFirstMobile/furry-ninja/tarball/master#egg=furryninja-0.3.1'
     ]
 )
