@@ -272,8 +272,8 @@ class TestCassandraRepository(CassandraTestCaseBase, unittest.TestCase):
         cql_edges = self.repo.fetch(Edge.query())
         self.assertEqual(len(cql_edges), 4)
 
-        # Remove one will result in no new edges and one delete. So total call count should be 5
         removed_edge = image.attributes.imageFormat.pop()
+        image.attributes.imageFormat = [image.attributes.imageFormat[0]]
         existing_edges = edges
         existing_edges[-1] = Edge(**{
             'key': 'EJLCVyC5AUEQ-AxpVmA5oQwRWZ',
@@ -288,7 +288,7 @@ class TestCassandraRepository(CassandraTestCaseBase, unittest.TestCase):
         self.assertEqual(len(cql_edges), 3)
 
         # Adding one will result in 1 new edges and 0 delete.
-        image.attributes.imageFormat.append(removed_edge)
+        image.attributes.imageFormat = image.attributes.imageFormat + [removed_edge]
         existing_edges = edges
         edges = self.repo.find_edges(image)
 
