@@ -17,10 +17,10 @@ setup(
         'cassandra-driver',
         'cql',
         'blist',
-        'furryninja==0.3.2',
+        'furryninja==0.3.4',
         'pysandra-unit'
     ],
     dependency_links=[
-        'https://github.com/EFEducationFirstMobile/furry-ninja/tarball/master#egg=furryninja-0.3.2'
+        'https://github.com/EFEducationFirstMobile/furry-ninja/tarball/master#egg=furryninja-0.3.4'
     ]
 )

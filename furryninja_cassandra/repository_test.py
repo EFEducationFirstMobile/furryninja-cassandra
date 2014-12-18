@@ -16,7 +16,7 @@ __author__ = 'broken'
 
 
 class PYSANDRASettings:
-    PYSANDRA_SCHEMA_FILE_PATH = '/Users/broken/ef/development/furryninja-cassandra/test_config/cassandra.schema.cql'
+    PYSANDRA_SCHEMA_FILE_PATH = '/Users/broken/work/projects/furryninja-cassandra/test_config/cassandra.schema.cql'
     PYSANDRA_TMP_DIR = '/tmp/cassandratmp'
     PYSANDRA_CASSANDRA_YAML_OPTIONS = {}
 
@@ -27,7 +27,7 @@ Settings.set('db', {
     'name': 'test_keyspace',
     'port': '9142',
     'host': ['localhost'],
-    'protocol_version': 2
+    'protocol_version': 1
 })
 
 
