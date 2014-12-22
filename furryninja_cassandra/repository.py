@@ -179,7 +179,7 @@ class CassandraRepository(Repository):
             model_cls = Model._lookup_model(Key.from_string(row['key']).kind)
             model_data = model_cls._db_to_storage_type(row)
             model = model_cls(**model_data)
-            self.resolve_referenced_keys(model, fields=fields).join()
+            self.resolve_referenced_keys(model, fields=fields)
             result.append(model)
         return result
 
@@ -196,7 +196,7 @@ class CassandraRepository(Repository):
         row = rows[0]
         model_data = model.__class__._db_to_storage_type(row)
         model.populate(**model_data)
-        self.resolve_referenced_keys(model, fields=fields).join()
+        self.resolve_referenced_keys(model, fields=fields)
         return model
 
     def delete(self, model):
