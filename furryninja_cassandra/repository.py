@@ -38,6 +38,8 @@ class Edge(Model, CassandraModelMixin):
 
 class CassandraRepository(Repository):
     def __init__(self, connection_class=Cluster):
+        super(CassandraRepository, self).__init__()
+        
         self.settings = dict(host='localhost', port=9042, protocol_version=2)
         self.settings.update(Settings.get('db'))
 
