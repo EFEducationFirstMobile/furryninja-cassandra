@@ -83,6 +83,7 @@ class CassandraRepository(Repository):
         return fields
 
     def __execute(self, cql_qry):
+        assert isinstance(cql_qry, CassandraQuery), 'cql_qry should be of type CassandraQuery'
         serial_consistency_level = None
         if self.settings.get('serial_consistency_level', None):
             serial_consistency_level = int(self.settings.get('serial_consistency_level'))
@@ -91,7 +92,10 @@ class CassandraRepository(Repository):
             serial_consistency_level = ConsistencyLevel.SERIAL
 
         stmt = SimpleStatement(cql_qry.statement, serial_consistency_level=serial_consistency_level)
-        self.session.execute(stmt, parameters=cql_qry.condition_values)
+        return self.session.execute(stmt, parameters=cql_qry.condition_values)
+
+    def __execute_batch(self, batch):
+        return self.session.execute(batch)
 
     @staticmethod
     def __validate_model(model):
@@ -187,7 +191,7 @@ class CassandraRepository(Repository):
     def fetch(self, query, fields=None):
         result = []
         cql_qry = CassandraQuery(query).select()
-        rows = self.session.execute(cql_qry.statement, parameters=cql_qry.condition_values)
+        rows = self.__execute(cql_qry)
 
         for row in rows:
             model_cls = Model._lookup_model(Key.from_string(row['key']).kind)
@@ -202,7 +206,7 @@ class CassandraRepository(Repository):
 
         query = model.query(*[getattr(model.__class__, field) == getattr(model, field) for field in self.__get_primary_key_fields(model)]).limit(1)
         cql_qry = CassandraQuery(query).select()
-        rows = self.session.execute(cql_qry.statement, parameters=cql_qry.condition_values)
+        rows = self.__execute(cql_qry)
 
         if not rows:
             raise QueryNotFoundException
@@ -219,12 +223,12 @@ class CassandraRepository(Repository):
         edge_query = Edge.query(Edge.indoc == model.key)
         cql_qry = CassandraQuery(edge_query).select()
 
-        existing_edges = self.session.execute(cql_qry.statement, parameters=cql_qry.condition_values)
+        existing_edges = self.__execute(cql_qry)
         self.delete_edge(existing_edges)
 
         query = model.query(*[getattr(model.__class__, field) == getattr(model, field) for field in self.__get_primary_key_fields(model)]).limit(1)
         cql_qry = CassandraQuery(query).delete()
-        self.session.execute(cql_qry.statement, parameters=cql_qry.condition_values)
+        self.__execute(cql_qry)
 
     def delete_edge(self, models):
         if models and self.settings['protocol_version'] >= 2:
@@ -235,13 +239,13 @@ class CassandraRepository(Repository):
                 cql_qry = CassandraQuery(Edge.query(Edge.indoc == edge.indoc, Edge.outdoc == edge.outdoc, Edge.label == edge.label)).delete()
                 batch.add(cql_qry.statement, parameters=cql_qry.condition_values)
 
-            self.session.execute(batch)
+            self.__execute_batch(batch)
         elif models:
             for edge in models:
                 if isinstance(edge, dict):
                     edge = Edge(**edge)
                 cql_qry = CassandraQuery(Edge.query(Edge.indoc == edge.indoc, Edge.outdoc == edge.outdoc, Edge.label == edge.label)).delete()
-                self.session.execute(cql_qry.statement, parameters=cql_qry.condition_values)
+                self.__execute(cql_qry)
 
     def insert_edge(self, model):
         cql_qry = CassandraQuery(Edge.query()).insert({
@@ -251,9 +255,10 @@ class CassandraRepository(Repository):
             'outdoc': model.outdoc.urlsafe()
         })
 
-        self.session.execute(cql_qry.statement, parameters=cql_qry.condition_values)
+        self.__execute(cql_qry)
 
     def __insert(self, models):
+        assert models, 'You can insert nothing, what good would that do?'
         batch = BatchStatement()
         for model in models:
             self.__validate_model(model)
@@ -265,7 +270,7 @@ class CassandraRepository(Repository):
 
             cql_qry = CassandraQuery(model.query()).insert(fields)
             batch.add(cql_qry.statement, parameters=cql_qry.condition_values)
-        err = self.session.execute(batch, trace=True)
+        self.__execute_batch(batch)
 
         for model in models:
             model._post_put_hook()
