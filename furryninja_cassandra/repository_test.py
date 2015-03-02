@@ -1,6 +1,7 @@
 import copy
 import json
 import unittest
+from cassandra import ConsistencyLevel
 from pysandraunit.testcasebase import CassandraTestCaseBase
 import mock
 import pytz
@@ -27,7 +28,8 @@ Settings.set('db', {
     'name': 'test_keyspace',
     'port': '9142',
     'host': ['localhost'],
-    'protocol_version': 2
+    'protocol_version': 2,
+    'consistency_level': ConsistencyLevel.SERIAL
 })
 
 
@@ -122,6 +124,7 @@ class Book(Model, TestModelMixin):
 class VideoAsset(Model, CassandraModelMixin):
     title = StringProperty(default='monkey')
     music = 'rock'
+    num = IntegerProperty()
 
     def _pre_put_hook(self):
         self.music = 'metal'
@@ -314,6 +317,38 @@ class TestCassandraRepository(CassandraTestCaseBase, unittest.TestCase):
 
         updated_image = self.repo.get(image)
         self.assertEqual(updated_image.title, 'Hello, earth!')
+
+    def test_update_model_if_num(self):
+        video = VideoAsset(**{'title': 'monkey', 'num': 1})
+        self.repo.insert(video)
+
+        video.title = 'Hello, earth!'
+        self.repo.update(video, update_if=('num', 2))
+
+        video = self.repo.get(video)
+        self.assertEqual(video.title, 'monkey')
+
+        video.title = 'Hello, earth!'
+        self.repo.update(video, update_if=('num', 1))
+
+        video = self.repo.get(video)
+        self.assertEqual(video.title, 'Hello, earth!')
+
+    def test_update_model_if_str(self):
+        video = VideoAsset(**{'title': 'monkey', 'num': 1})
+        self.repo.insert(video)
+
+        video.title = 'Hello, earth!'
+        self.repo.update(video, update_if=('title', 'apa'))
+
+        video = self.repo.get(video)
+        self.assertEqual(video.title, 'monkey')
+
+        video.title = 'Hello, earth!'
+        self.repo.update(video, update_if=('title', 'monkey'))
+
+        video = self.repo.get(video)
+        self.assertEqual(video.title, 'Hello, earth!')
 
     def test_update_edges(self):
         image = ImageAsset(**copy.deepcopy(IMAGE_ASSET))

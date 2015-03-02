@@ -31,8 +31,7 @@ create table imageasset (
 create table videoasset (
   key varchar,
   title varchar,
-  create_date timestamp,
-  last_update timestamp,
+  num int,
   primary key (key)
 );
 

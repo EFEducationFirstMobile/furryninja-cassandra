@@ -167,5 +167,5 @@ class TestCassandraQuery(unittest.TestCase):
             'last_update': last_update
         }).update_if('update_token', 'abcdef')
 
-        self.assertEqual(cassandra_qry.statement, 'UPDATE imageasset SET blob = %(blob)s, last_update = %(last_update)s WHERE key = %(key)s if update_token = %(update_token)s')
-        self.assertEqual(cassandra_qry.condition_values['update_token'], 'abcdef')
+        self.assertEqual(cassandra_qry.statement, 'UPDATE imageasset SET blob = %(blob)s, last_update = %(last_update)s WHERE key = %(key)s if update_token = %(if_update_token)s')
+        self.assertEqual(cassandra_qry.condition_values['if_update_token'], 'abcdef')

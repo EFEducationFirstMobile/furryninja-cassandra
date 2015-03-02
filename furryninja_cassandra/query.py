@@ -105,9 +105,9 @@ class CassandraQuery(object):
 
     def update_if(self, field, value):
         self.__cql_stmt.strip()
-        self.__cql_stmt += ' if ' + field + ' = %(' + field + ')s'
+        self.__cql_stmt += ' if ' + field + ' = %(if_' + field + ')s'
 
-        self.__condition_values.update({field: value})
+        self.__condition_values.update({('if_%s' % field): value})
 
         return self
 
@@ -118,7 +118,3 @@ class CassandraQuery(object):
     @property
     def condition_values(self):
         return self.__condition_values
-
-    @classmethod
-    def merge(cls, target, other):
-        return target
