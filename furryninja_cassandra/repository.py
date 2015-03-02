@@ -257,7 +257,7 @@ class CassandraRepository(Repository):
 
         self.__execute(cql_qry)
 
-    def __insert(self, models):
+    def __insert(self, models, if_not_exists=None):
         assert models, 'You can insert nothing, what good would that do?'
         batch = BatchStatement()
         for model in models:
@@ -269,6 +269,8 @@ class CassandraRepository(Repository):
             fields.update(self.__construct_primary_key(model))
 
             cql_qry = CassandraQuery(model.query()).insert(fields)
+            if if_not_exists:
+                cql_qry.if_not_exists()
             batch.add(cql_qry.statement, parameters=cql_qry.condition_values)
         self.__execute_batch(batch)
 
@@ -282,11 +284,11 @@ class CassandraRepository(Repository):
             return models[0]
         return models
 
-    def insert(self, model):
-        return self.__insert([model])
+    def insert(self, model, if_not_exists=None):
+        return self.__insert([model], if_not_exists=if_not_exists)
 
-    def insert_multi(self, models):
-        return self.__insert(models)
+    def insert_multi(self, models, if_not_exists=None):
+        return self.__insert(models, if_not_exists=if_not_exists)
 
     def update(self, model, update_if=None):
         self.__validate_model(model)
