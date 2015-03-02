@@ -235,26 +235,15 @@ class TestCassandraRepository(CassandraTestCaseBase, unittest.TestCase):
         entities = self.repo.fetch(image.query())
         self.assertEqual(len(entities), 1)
 
-    # def test_create_model_if_exists(self):
-    #     image = ImageAsset(**copy.deepcopy(IMAGE_ASSET))
-    #     image.version = '2'
-    #     self.repo.insert(image)
-    #
-    #     image.title = 'aaaaaaaa'
-    #
-    #     self.repo.update(image)
-    #     self.maxDiff = None
-    #
-    #     entities = self.repo.fetch(image.query())
-    #     self.assertEqual(entities[0].title, 'aaaaaaaa')
-    #
-    #     image.title = 'bbbb'
-    #     image.version = '3'
-    #     self.repo.update(image)
-    #     self.maxDiff = None
-    #
-    #     entities = self.repo.fetch(image.query())
-    #     self.assertEqual(entities[0].title, 'aaaaaaaa')
+    def test_create_model_if_exists(self):
+        image = ImageAsset(**copy.deepcopy(IMAGE_ASSET))
+        self.repo.insert(image)
+
+        entities = self.repo.fetch(image.query())
+        self.assertEqual(len(entities), 1)
+
+        self.repo.insert(image)
+        self.assertEqual(len(entities), 1)
 
     def test_create_multi_model(self):
         images = [
