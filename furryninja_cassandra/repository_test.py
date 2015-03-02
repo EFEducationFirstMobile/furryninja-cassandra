@@ -245,6 +245,16 @@ class TestCassandraRepository(CassandraTestCaseBase, unittest.TestCase):
         self.repo.insert(image)
         self.assertEqual(len(entities), 1)
 
+    def test_create_model_multi(self):
+        image = ImageAsset(**copy.deepcopy(IMAGE_ASSET))
+        image2 = ImageAsset(**copy.deepcopy(IMAGE_ASSET))
+        image3 = ImageAsset(**copy.deepcopy(IMAGE_ASSET))
+        image4 = ImageAsset(**copy.deepcopy(IMAGE_ASSET))
+        self.repo.insert_multi([image, image2, image3, image4])
+
+        entities = self.repo.fetch(image.query())
+        self.assertEqual(len(entities), 4)
+
     def test_create_multi_model(self):
         images = [
             ImageAsset(**copy.deepcopy(IMAGE_ASSET)),
