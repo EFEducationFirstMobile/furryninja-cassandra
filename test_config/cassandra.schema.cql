@@ -24,8 +24,7 @@ create table imageasset (
   key varchar,
   revision varchar,
   blob varchar,
-  create_date timestamp,
-  last_update timestamp,
+  update_token varchar,
   primary key (key, revision)
 );
 

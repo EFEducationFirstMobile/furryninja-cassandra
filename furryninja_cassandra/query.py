@@ -6,9 +6,11 @@ __author__ = 'broken'
 
 
 class CassandraQuery(object):
-    def __init__(self, query):
+    def __init__(self, query=None):
         assert isinstance(query, Query), 'query must be a instance of Query, got %r' % query
         self.query = query
+        self.__cql_stmt = ''
+        self.__condition_values = {}
 
     @staticmethod
     def _where_clause(query_filters):
@@ -60,7 +62,9 @@ class CassandraQuery(object):
         query_string += self._limit()
         query_string += self._offset()
 
-        return query_string, condition_values
+        self.__cql_stmt += query_string
+        self.__condition_values.update(condition_values)
+        return self
 
     def delete(self):
         assert self.query.filters(), 'A delete statement must have filters'
@@ -69,22 +73,52 @@ class CassandraQuery(object):
         where_string, condition_values = self._where_clause(self.query.filters())
         query_string += where_string
 
-        return query_string, condition_values
+        self.__cql_stmt += query_string
+        self.__condition_values.update(condition_values)
+        return self
 
-    @classmethod
-    def insert(cls, table, data):
-        query_string = 'INSERT INTO %s (%s) VALUES (%s)' % (lower(table), ', '.join(data.keys()), ', '.join(['%(' + name + ')s' for name in data.keys()]))
+    def insert(self, data):
+        query_string = 'INSERT INTO %s (%s) VALUES (%s)' % (lower(self.query.table), ', '.join(data.keys()), ', '.join(['%(' + name + ')s' for name in data.keys()]))
         condition_values = data
-        return query_string, condition_values
 
-    @classmethod
-    def update(cls, table, data, where):
-        query_string = 'UPDATE %s SET %s' % (lower(table), ', '.join([name +' = %(' + name + ')s' for name in data.keys()]))
-        if not isinstance(where, list):
-            where = [where]
+        self.__cql_stmt += query_string
+        self.__condition_values.update(condition_values)
+        return self
 
-        where_string, condition_values = cls._where_clause(where)
+    def update(self, data):
+        query_string = 'UPDATE %s SET %s' % (lower(self.query.table), ', '.join([name +' = %(' + name + ')s' for name in data.keys()]))
+
+        where_string, condition_values = self._where_clause(self.query.filters())
         query_string += where_string
 
         condition_values.update(data)
-        return query_string, condition_values
+
+        self.__cql_stmt += query_string
+        self.__condition_values.update(condition_values)
+        return self
+
+    def if_not_exists(self):
+        self.__cql_stmt.strip()
+        self.__cql_stmt += ' if not exists'
+
+        return self
+
+    def update_if(self, field, value):
+        self.__cql_stmt.strip()
+        self.__cql_stmt += ' if ' + field + ' = %(' + field + ')s'
+
+        self.__condition_values.update({field: value})
+
+        return self
+
+    @property
+    def statement(self):
+        return self.__cql_stmt
+
+    @property
+    def condition_values(self):
+        return self.__condition_values
+
+    @classmethod
+    def merge(cls, target, other):
+        return target
