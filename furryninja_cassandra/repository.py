@@ -1,13 +1,14 @@
 # -*- coding: utf-8 -*-
 from itertools import ifilter
 import datetime
+from cassandra import ConsistencyLevel
 
 import pytz
 import logging
 
 from cassandra.cluster import Cluster
 from cassandra.policies import HostDistance
-from cassandra.query import ordered_dict_factory, BatchStatement
+from cassandra.query import ordered_dict_factory, BatchStatement, SimpleStatement
 from furryninja.model import AttributesProperty, DateTimeProperty
 
 from furryninja.repository import Repository
@@ -80,6 +81,17 @@ class CassandraRepository(Repository):
             fields[key_part.name] = '%s' % getattr(model, key_part.name)
 
         return fields
+
+    def __execute(self, cql_qry):
+        serial_consistency_level = None
+        if self.settings.get('serial_consistency_level', None):
+            serial_consistency_level = int(self.settings.get('serial_consistency_level'))
+        # For conditional DELETE, INSERT or UPDATES use lightweight transactions with ConsistencyLevel.SERIAL
+        if 'IF' in cql_qry.statement:
+            serial_consistency_level = ConsistencyLevel.SERIAL
+
+        stmt = SimpleStatement(cql_qry.statement, serial_consistency_level=serial_consistency_level)
+        self.session.execute(stmt, parameters=cql_qry.condition_values)
 
     @staticmethod
     def __validate_model(model):
@@ -271,7 +283,7 @@ class CassandraRepository(Repository):
     def insert_multi(self, models):
         return self.__insert(models)
 
-    def update(self, model):
+    def update(self, model, update_if=None):
         self.__validate_model(model)
 
         model._pre_put_hook()
@@ -286,7 +298,11 @@ class CassandraRepository(Repository):
         assert fields.keys(), 'Model has no properties.'
 
         cql_qry = CassandraQuery(model.query(*where)).update(fields)
-        err = self.session.execute(cql_qry.statement, parameters=cql_qry.condition_values)
+        if update_if:
+            assert isinstance(update_if, tuple) and len(update_if) == 2, 'update_if should be a tuple (field, value) of length 2'
+            cql_qry.update_if(update_if[0], update_if[1])
+
+        self.__execute(cql_qry)
 
         model._post_put_hook()
 
