@@ -1,6 +1,7 @@
 import copy
 import json
 import unittest
+from cassandra import ConsistencyLevel
 from pysandraunit.testcasebase import CassandraTestCaseBase
 import mock
 import pytz
@@ -16,7 +17,7 @@ __author__ = 'broken'
 
 
 class PYSANDRASettings:
-    PYSANDRA_SCHEMA_FILE_PATH = '/Users/broken/work/projects/furryninja-cassandra/test_config/cassandra.schema.cql'
+    PYSANDRA_SCHEMA_FILE_PATH = '/Users/broken/ef/development/furryninja-cassandra/test_config/cassandra.schema.cql'
     PYSANDRA_TMP_DIR = '/tmp/cassandratmp'
     PYSANDRA_CASSANDRA_YAML_OPTIONS = {}
 
@@ -27,7 +28,8 @@ Settings.set('db', {
     'name': 'test_keyspace',
     'port': '9142',
     'host': ['localhost'],
-    'protocol_version': 1
+    'protocol_version': 2,
+    'consistency_level': ConsistencyLevel.SERIAL
 })
 
 
@@ -35,6 +37,7 @@ IMAGE_ASSET = {
     'name': 'Written speech',
     'description': 'Lorem ipsum dolor sit amet, consectetur adipisici elit',
     'title': 'Lorem Ipsum',
+    'version': '42',
     'skills': [
         'flying',
         'superpowers'
@@ -69,6 +72,14 @@ class TestModelMixin(CassandraModelMixin):
 
     @key_ref
     def revision(self):
+        if hasattr(self, 'version'):
+            return self.version
+        return '1'
+
+    @key_ref
+    def update_token(self):
+        if hasattr(self, 'version'):
+            return self.version
         return '1'
 
 
@@ -80,6 +91,7 @@ class ImageAsset(Model, TestModelMixin):
     default_fields = ['topics', 'attributes.imageFormat', 'attributes.imageType']
 
     title = StringProperty()
+    version = StringProperty()
     description = StringProperty()
     name = StringProperty()
     skills = StringProperty(repeated=True)
@@ -112,9 +124,16 @@ class Book(Model, TestModelMixin):
 class VideoAsset(Model, CassandraModelMixin):
     title = StringProperty(default='monkey')
     music = 'rock'
+    num = IntegerProperty()
 
     def _pre_put_hook(self):
         self.music = 'metal'
+
+    @key_ref
+    def revision(self):
+        if hasattr(self, 'version'):
+            return self.version
+        return '1'
 
 
 class TestCassandraRepository(CassandraTestCaseBase, unittest.TestCase):
@@ -207,8 +226,8 @@ class TestCassandraRepository(CassandraTestCaseBase, unittest.TestCase):
     def test_create_model(self):
         image = ImageAsset(**copy.deepcopy(IMAGE_ASSET))
 
-        cql_statement, condition_values = CassandraQuery.insert(image.table(), {'blob': '<--blob-->', 'key': '<--key-->'})
-        self.assertEqual(cql_statement, 'INSERT INTO imageasset (blob, key) VALUES (%(blob)s, %(key)s)')
+        cql_qry = CassandraQuery(ImageAsset.query()).insert({'blob': '<--blob-->', 'key': '<--key-->'})
+        self.assertEqual(cql_qry.statement, 'INSERT INTO imageasset (blob, key) VALUES (%(blob)s, %(key)s)')
 
         self.repo.insert(image)
         self.maxDiff = None
@@ -216,14 +235,49 @@ class TestCassandraRepository(CassandraTestCaseBase, unittest.TestCase):
         entities = self.repo.fetch(image.query())
         self.assertEqual(len(entities), 1)
 
+    def test_create_model_if_exists(self):
+        image = ImageAsset(**copy.deepcopy(IMAGE_ASSET))
+        self.repo.insert(image)
+
+        entities = self.repo.fetch(image.query())
+        self.assertEqual(len(entities), 1)
+
+        self.repo.insert(image)
+        self.assertEqual(len(entities), 1)
+
+    def test_create_model_multi(self):
+        image = ImageAsset(**copy.deepcopy(IMAGE_ASSET))
+        image2 = ImageAsset(**copy.deepcopy(IMAGE_ASSET))
+        image3 = ImageAsset(**copy.deepcopy(IMAGE_ASSET))
+        image4 = ImageAsset(**copy.deepcopy(IMAGE_ASSET))
+        self.repo.insert_multi([image, image2, image3, image4])
+
+        entities = self.repo.fetch(image.query())
+        self.assertEqual(len(entities), 4)
+
+    def test_create_multi_model(self):
+        images = [
+            ImageAsset(**copy.deepcopy(IMAGE_ASSET)),
+            ImageAsset(**copy.deepcopy(IMAGE_ASSET)),
+            ImageAsset(**copy.deepcopy(IMAGE_ASSET)),
+            ImageAsset(**copy.deepcopy(IMAGE_ASSET)),
+            ImageAsset(**copy.deepcopy(IMAGE_ASSET))
+        ]
+
+        self.repo.insert_multi(images)
+        self.maxDiff = None
+
+        entities = self.repo.fetch(images[0].query())
+        self.assertEqual(len(entities), 5)
+
     def test_get_model(self):
         en = Book(**{
             'title': 'Lorem ipsum'
         })
 
         query = en.query(en.__class__.key == en.key).limit(1)
-        cql_statement, condition_values = CassandraQuery(query).select()
-        self.assertEqual(cql_statement, 'SELECT * FROM book WHERE key = %(key)s LIMIT 1')
+        cql_qry = CassandraQuery(query).select()
+        self.assertEqual(cql_qry.statement, 'SELECT * FROM book WHERE key = %(key)s LIMIT 1')
 
         self.repo.insert(en)
         self.maxDiff = None
@@ -262,6 +316,38 @@ class TestCassandraRepository(CassandraTestCaseBase, unittest.TestCase):
 
         updated_image = self.repo.get(image)
         self.assertEqual(updated_image.title, 'Hello, earth!')
+
+    def test_update_model_if_num(self):
+        video = VideoAsset(**{'title': 'monkey', 'num': 1})
+        self.repo.insert(video)
+
+        video.title = 'Hello, earth!'
+        self.repo.update(video, update_if=('num', 2))
+
+        video = self.repo.get(video)
+        self.assertEqual(video.title, 'monkey')
+
+        video.title = 'Hello, earth!'
+        self.repo.update(video, update_if=('num', 1))
+
+        video = self.repo.get(video)
+        self.assertEqual(video.title, 'Hello, earth!')
+
+    def test_update_model_if_str(self):
+        video = VideoAsset(**{'title': 'monkey', 'num': 1})
+        self.repo.insert(video)
+
+        video.title = 'Hello, earth!'
+        self.repo.update(video, update_if=('title', 'apa'))
+
+        video = self.repo.get(video)
+        self.assertEqual(video.title, 'monkey')
+
+        video.title = 'Hello, earth!'
+        self.repo.update(video, update_if=('title', 'monkey'))
+
+        video = self.repo.get(video)
+        self.assertEqual(video.title, 'Hello, earth!')
 
     def test_update_edges(self):
         image = ImageAsset(**copy.deepcopy(IMAGE_ASSET))

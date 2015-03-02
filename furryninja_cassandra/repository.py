@@ -1,13 +1,14 @@
 # -*- coding: utf-8 -*-
 from itertools import ifilter
 import datetime
+from cassandra import ConsistencyLevel
 
 import pytz
 import logging
 
 from cassandra.cluster import Cluster
 from cassandra.policies import HostDistance
-from cassandra.query import ordered_dict_factory, BatchStatement
+from cassandra.query import ordered_dict_factory, BatchStatement, SimpleStatement
 from furryninja.model import AttributesProperty, DateTimeProperty
 
 from furryninja.repository import Repository
@@ -80,6 +81,21 @@ class CassandraRepository(Repository):
             fields[key_part.name] = '%s' % getattr(model, key_part.name)
 
         return fields
+
+    def __execute(self, cql_qry):
+        assert isinstance(cql_qry, CassandraQuery), 'cql_qry should be of type CassandraQuery'
+        serial_consistency_level = None
+        if self.settings.get('serial_consistency_level', None):
+            serial_consistency_level = int(self.settings.get('serial_consistency_level'))
+        # For conditional DELETE, INSERT or UPDATES use lightweight transactions with ConsistencyLevel.SERIAL
+        if 'IF' in cql_qry.statement:
+            serial_consistency_level = ConsistencyLevel.SERIAL
+
+        stmt = SimpleStatement(cql_qry.statement, serial_consistency_level=serial_consistency_level)
+        return self.session.execute(stmt, parameters=cql_qry.condition_values)
+
+    def __execute_batch(self, batch):
+        return self.session.execute(batch)
 
     @staticmethod
     def __validate_model(model):
@@ -174,8 +190,8 @@ class CassandraRepository(Repository):
 
     def fetch(self, query, fields=None):
         result = []
-        cql_statement, condition_values = CassandraQuery(query).select()
-        rows = self.session.execute(cql_statement, parameters=condition_values)
+        cql_qry = CassandraQuery(query).select()
+        rows = self.__execute(cql_qry)
 
         for row in rows:
             model_cls = Model._lookup_model(Key.from_string(row['key']).kind)
@@ -189,8 +205,8 @@ class CassandraRepository(Repository):
         self.__validate_model(model)
 
         query = model.query(*[getattr(model.__class__, field) == getattr(model, field) for field in self.__get_primary_key_fields(model)]).limit(1)
-        cql_statement, condition_values = CassandraQuery(query).select()
-        rows = self.session.execute(cql_statement, parameters=condition_values)
+        cql_qry = CassandraQuery(query).select()
+        rows = self.__execute(cql_qry)
 
         if not rows:
             raise QueryNotFoundException
@@ -205,14 +221,14 @@ class CassandraRepository(Repository):
         self.__validate_model(model)
 
         edge_query = Edge.query(Edge.indoc == model.key)
-        edge_cql_statement, condition_values = CassandraQuery(edge_query).select()
+        cql_qry = CassandraQuery(edge_query).select()
 
-        existing_edges = self.session.execute(edge_cql_statement, parameters=condition_values)
+        existing_edges = self.__execute(cql_qry)
         self.delete_edge(existing_edges)
 
         query = model.query(*[getattr(model.__class__, field) == getattr(model, field) for field in self.__get_primary_key_fields(model)]).limit(1)
-        cql_statement, condition_values = CassandraQuery(query).delete()
-        self.session.execute(cql_statement, parameters=condition_values)
+        cql_qry = CassandraQuery(query).delete()
+        self.__execute(cql_qry)
 
     def delete_edge(self, models):
         if models and self.settings['protocol_version'] >= 2:
@@ -220,46 +236,61 @@ class CassandraRepository(Repository):
             for edge in models:
                 if isinstance(edge, dict):
                     edge = Edge(**edge)
-                cql_statement, condition_values = CassandraQuery(Edge.query(Edge.indoc == edge.indoc, Edge.outdoc == edge.outdoc, Edge.label == edge.label)).delete()
-                batch.add(cql_statement, parameters=condition_values)
+                cql_qry = CassandraQuery(Edge.query(Edge.indoc == edge.indoc, Edge.outdoc == edge.outdoc, Edge.label == edge.label)).delete()
+                batch.add(cql_qry.statement, parameters=cql_qry.condition_values)
 
-            self.session.execute(batch)
+            self.__execute_batch(batch)
         elif models:
             for edge in models:
                 if isinstance(edge, dict):
                     edge = Edge(**edge)
-                cql_statement, condition_values = CassandraQuery(Edge.query(Edge.indoc == edge.indoc, Edge.outdoc == edge.outdoc, Edge.label == edge.label)).delete()
-                self.session.execute(cql_statement, parameters=condition_values)
+                cql_qry = CassandraQuery(Edge.query(Edge.indoc == edge.indoc, Edge.outdoc == edge.outdoc, Edge.label == edge.label)).delete()
+                self.__execute(cql_qry)
 
     def insert_edge(self, model):
-        cql_statement, condition_values = CassandraQuery.insert(Edge.table(), {
+        cql_qry = CassandraQuery(Edge.query()).insert({
             'key': model.key.urlsafe(),
             'label': model.label,
             'indoc': model.indoc.urlsafe(),
             'outdoc': model.outdoc.urlsafe()
         })
 
-        self.session.execute(cql_statement, parameters=condition_values)
+        self.__execute(cql_qry)
 
-    def insert(self, model):
-        self.__validate_model(model)
+    def __insert(self, models, if_not_exists=None):
+        assert models, 'You can insert nothing, what good would that do?'
+        batch = BatchStatement()
+        for model in models:
+            self.__validate_model(model)
 
-        model._pre_put_hook()
+            model._pre_put_hook()
 
-        fields = self.denormalize(model)
-        fields.update(self.__construct_primary_key(model))
+            fields = self.denormalize(model)
+            fields.update(self.__construct_primary_key(model))
 
-        cql_statement, condition_values = CassandraQuery.insert(model.table(), fields)
-        self.session.execute(cql_statement, parameters=condition_values)
+            cql_qry = CassandraQuery(model.query()).insert(fields)
+            if if_not_exists:
+                cql_qry.if_not_exists()
+            batch.add(cql_qry.statement, parameters=cql_qry.condition_values)
+        self.__execute_batch(batch)
 
-        model._post_put_hook()
+        for model in models:
+            model._post_put_hook()
 
-        edges = self.find_edges(model)
-        if edges:
-            self.set_edges_for_model(model, edges)
-        return model
+            edges = self.find_edges(model)
+            if edges:
+                self.set_edges_for_model(model, edges)
+        if len(models) == 1:
+            return models[0]
+        return models
 
-    def update(self, model):
+    def insert(self, model, if_not_exists=None):
+        return self.__insert([model], if_not_exists=if_not_exists)
+
+    def insert_multi(self, models, if_not_exists=None):
+        return self.__insert(models, if_not_exists=if_not_exists)
+
+    def update(self, model, update_if=None):
         self.__validate_model(model)
 
         model._pre_put_hook()
@@ -273,8 +304,12 @@ class CassandraRepository(Repository):
             where.append(getattr(model.__class__, field) == getattr(model, field))
         assert fields.keys(), 'Model has no properties.'
 
-        cql_statement, condition_values = CassandraQuery.update(model.table(), fields, where)
-        self.session.execute(cql_statement, parameters=condition_values)
+        cql_qry = CassandraQuery(model.query(*where)).update(fields)
+        if update_if:
+            assert isinstance(update_if, tuple) and len(update_if) == 2, 'update_if should be a tuple (field, value) of length 2'
+            cql_qry.update_if(update_if[0], update_if[1])
+
+        self.__execute(cql_qry)
 
         model._post_put_hook()
 
