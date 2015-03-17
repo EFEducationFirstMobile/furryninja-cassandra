@@ -5,28 +5,29 @@ from cassandra import ConsistencyLevel
 from pysandraunit.testcasebase import CassandraTestCaseBase
 import mock
 import pytz
-from furryninja import KeyProperty, AttributesProperty, IntegerProperty, StringProperty, Model, Key, key_ref
+
+from furryninja import KeyProperty, AttributesProperty, IntegerProperty, StringProperty, Model, key_ref
 from furryninja.model import DateTimeProperty
 from furryninja import Settings
 from furryninja import QueryNotFoundException
 from furryninja_cassandra.query import CassandraQuery
-from .repository import CassandraRepository, Edge
+
+from .repository import CassandraCluster, Edge
 from .model import CassandraModelMixin
 
 __author__ = 'broken'
 
 
 class PYSANDRASettings:
-    PYSANDRA_SCHEMA_FILE_PATH = '/Users/broken/ef/development/furryninja-cassandra/test_config/cassandra.schema.cql'
+    PYSANDRA_SCHEMA_FILE_PATH = './test_config/cassandra.schema.cql'
     PYSANDRA_TMP_DIR = '/tmp/cassandratmp'
     PYSANDRA_CASSANDRA_YAML_OPTIONS = {}
 
 CassandraTestCaseBase.set_global_settings(PYSANDRASettings)
 
-
 Settings.set('db', {
     'name': 'test_keyspace',
-    'port': '9142',
+    'port': '9042',
     'host': ['localhost'],
     'protocol_version': 2,
     'consistency_level': ConsistencyLevel.SERIAL
@@ -138,9 +139,9 @@ class VideoAsset(Model, CassandraModelMixin):
 
 class TestCassandraRepository(CassandraTestCaseBase, unittest.TestCase):
     def setUp(self):
-
         self._start_cassandra()
-        self.repo = CassandraRepository()
+        cluster = CassandraCluster()
+        self.repo = cluster.repository("test_keyspace")
 
     def tearDown(self):
         self._clean_cassandra()
