@@ -18,14 +18,6 @@ from .query import CassandraQuery
 from .exceptions import PrimaryKeyException, ModelValidationException
 
 logger = logging.getLogger('cassandra.repo')
-LIBEV = False
-
-try:
-    from cassandra.io.libevreactor import LibevConnection
-    LIBEV = True
-except ImportError:
-    logger.warn('Not using libev, this is bad. Install it!!')
-
 
 class Edge(Model, CassandraModelMixin):
     _storage_type = ('simple',)
@@ -40,7 +32,7 @@ class Edge(Model, CassandraModelMixin):
 class CassandraRepository(Repository):
     def __init__(self, connection_class=Cluster):
         super(CassandraRepository, self).__init__()
-        
+
         self.settings = dict(host='localhost', port=9042, protocol_version=2)
         self.settings.update(Settings.get('db'))
 
@@ -56,11 +48,7 @@ class CassandraRepository(Repository):
             port=self.settings['port'],
             protocol_version=self.settings['protocol_version']
         )
-
         cluster.set_core_connections_per_host(HostDistance.LOCAL, 10)
-        if LIBEV:
-            cluster.connection_class = LibevConnection
-
         self.session = cluster.connect(keyspace=self.settings['name'])
         self.session.row_factory = ordered_dict_factory
 
