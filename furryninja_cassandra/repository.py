@@ -37,32 +37,42 @@ class Edge(Model, CassandraModelMixin):
     last_update = DateTimeProperty(auto_now=True)
 
 
-class CassandraRepository(Repository):
+class CassandraCluster(object):
+
     def __init__(self, connection_class=Cluster):
-        super(CassandraRepository, self).__init__()
-        
         self.settings = dict(host='localhost', port=9042, protocol_version=2)
         self.settings.update(Settings.get('db'))
 
         assert self.settings.get('name', None), 'Missing required setting db.name'
-
         if not isinstance(self.settings.get('port'), int):
             self.settings['port'] = int(self.settings.get('port'))
         if not isinstance(self.settings.get('protocol_version'), int):
             self.settings['protocol_version'] = int(self.settings.get('protocol_version'))
 
-        cluster = connection_class(
+        self.cluster = connection_class(
             contact_points=self.settings['host'],
             port=self.settings['port'],
             protocol_version=self.settings['protocol_version']
         )
 
-        cluster.set_core_connections_per_host(HostDistance.LOCAL, 10)
+        self.cluster.set_core_connections_per_host(HostDistance.LOCAL, 10)
         if LIBEV:
-            cluster.connection_class = LibevConnection
+            self.cluster.connection_class = LibevConnection
 
-        self.session = cluster.connect(keyspace=self.settings['name'])
-        self.session.row_factory = ordered_dict_factory
+    def repository(self, keyspace):
+        session = self.cluster.connect()
+        session.row_factory = ordered_dict_factory
+        return CassandraRepository(self.settings, session, keyspace)
+
+class CassandraRepository(Repository):
+    def __init__(self, settings, session, keyspace):
+        super(CassandraRepository, self).__init__()
+        assert settings
+        assert session
+        assert keyspace
+        self.settings = settings
+        session.set_keyspace(keyspace)
+        self.session = session
 
     def __get_table_metadata(self, table_name):
         return self.session.cluster.metadata.keyspaces[Settings.get('db.name')].tables[table_name]
