@@ -71,7 +71,8 @@ class CassandraRepository(Repository):
         assert session
         assert keyspace
         self.settings = settings
-        self.session = session.set_keyspace(keyspace)
+        session.set_keyspace(keyspace)
+        self.session = session
 
     def __get_table_metadata(self, table_name):
         return self.session.cluster.metadata.keyspaces[Settings.get('db.name')].tables[table_name]

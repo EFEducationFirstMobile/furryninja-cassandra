@@ -27,7 +27,7 @@ CassandraTestCaseBase.set_global_settings(PYSANDRASettings)
 
 Settings.set('db', {
     'name': 'test_keyspace',
-    'port': '9042',
+    'port': '9142',
     'host': ['localhost'],
     'protocol_version': 2,
     'consistency_level': ConsistencyLevel.SERIAL
