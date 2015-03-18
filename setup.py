@@ -17,13 +17,13 @@ setup(
         'cassandra-driver',
         'cql',
         'blist',
-        'furryninja==0.4.0',
+        'furryninja==0.4.1-alfa',
         'pysandra-unit'
     ],
     tests_require=[
         'pysandra-unit',
     ],
     dependency_links=[
-        'git+ssh://git@github.com/EFEducationFirstMobile/furry-ninja.git#egg=furryninja-0.4.0',
+        'git+ssh://git@github.com/EFEducationFirstMobile/furry-ninja.git#egg=furryninja-0.4.1-alpha',
     ]
 )
