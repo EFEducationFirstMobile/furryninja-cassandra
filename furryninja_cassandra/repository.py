@@ -11,7 +11,7 @@ from cassandra.policies import HostDistance
 from cassandra.query import ordered_dict_factory, BatchStatement, SimpleStatement
 from furryninja.model import AttributesProperty, DateTimeProperty
 
-from furryninja.repository import Repository
+from furryninja.repository import Repository, RepositoryCluster
 from furryninja import Settings, KeyProperty, Key, Model, StringProperty, QueryNotFoundException
 from .model import CassandraModelMixin
 from .query import CassandraQuery
@@ -37,7 +37,7 @@ class Edge(Model, CassandraModelMixin):
     last_update = DateTimeProperty(auto_now=True)
 
 
-class CassandraCluster(object):
+class CassandraCluster(RepositoryCluster):
 
     def __init__(self, connection_class=Cluster):
         self.settings = dict(host='localhost', port=9042, protocol_version=2)
