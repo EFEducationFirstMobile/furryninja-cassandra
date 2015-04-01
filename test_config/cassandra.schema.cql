@@ -35,6 +35,12 @@ create table videoasset (
   primary key (key)
 );
 
+create table article (
+  key varchar,
+  revision int,
+  blob varchar,
+  primary key (key, revision)
+);
 
 create table edge (
   key varchar,

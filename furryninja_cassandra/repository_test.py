@@ -91,7 +91,7 @@ class ImageAsset(Model, TestModelMixin):
     default_fields = ['topics', 'attributes.imageFormat', 'attributes.imageType']
 
     title = StringProperty()
-    version = StringProperty()
+    version = StringProperty(default='1')
     description = StringProperty()
     name = StringProperty()
     skills = StringProperty(repeated=True)
@@ -154,7 +154,7 @@ class TestCassandraRepository(CassandraTestCaseBase, unittest.TestCase):
         tag = Tag(**{'title': 'A Tag'})
         image = ImageAsset(**{'name': 'Monkey', 'topics': [tag]})
 
-        expected = dict({'name': 'Monkey', 'key': image.key.urlsafe(), 'topics': [tag.key.urlsafe()]}.items())
+        expected = dict({'name': 'Monkey', 'key': image.key.urlsafe(), 'topics': [tag.key.urlsafe()], 'version': '1'}.items())
         self.assertDictEqual(json.loads(self.repo.denormalize(image)['blob']), expected)
 
     def test_denormalize_with_date(self):
@@ -243,6 +243,7 @@ class TestCassandraRepository(CassandraTestCaseBase, unittest.TestCase):
         self.assertEqual(len(entities), 1)
 
         self.repo.insert(image)
+        entities = self.repo.fetch(image.query())
         self.assertEqual(len(entities), 1)
 
     def test_create_model_multi(self):
@@ -437,3 +438,14 @@ class TestCassandraRepository(CassandraTestCaseBase, unittest.TestCase):
 
         self.repo.update(video2)
         self.assertEqual(video2.music, 'metal')
+
+    def test_non_text_primary_key(self):
+        class Article(Model, TestModelMixin):
+            revision = IntegerProperty(default=1)
+            title = StringProperty()
+
+        article = Article(**{'title': 'A magic title'})
+        self.repo.insert(article)
+
+        entities = self.repo.fetch(article.query())
+        self.assertEqual(len(entities), 1)

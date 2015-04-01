@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
 from itertools import ifilter
 import datetime
-from cassandra import ConsistencyLevel
-
 import pytz
 import logging
 
+from cassandra import ConsistencyLevel
 from cassandra.cluster import Cluster
 from cassandra.policies import HostDistance
 from cassandra.query import ordered_dict_factory, BatchStatement, SimpleStatement
@@ -18,6 +17,7 @@ from .query import CassandraQuery
 from .exceptions import PrimaryKeyException, ModelValidationException
 
 logger = logging.getLogger('cassandra.repo')
+
 
 class Edge(Model, CassandraModelMixin):
     _storage_type = ('simple',)
@@ -66,7 +66,13 @@ class CassandraRepository(Repository):
             if not hasattr(model, key_part.name):
                 raise PrimaryKeyException('Missing mandatory PRIMARY KEY part %r' % key_part.name)
 
-            fields[key_part.name] = '%s' % getattr(model, key_part.name)
+            value = getattr(model, key_part.name)
+            if isinstance(value, Key):
+                value = value.urlsafe()
+            elif value is not None:
+                # value = key_part.data_type.deserialize(struct.pack('>qihbQIHBfd', value), self.settings['protocol_version'])
+                value = self._cassandra_type_string_to_type(key_part.typestring)(value)
+            fields[key_part.name] = value
 
         return fields
 
@@ -89,6 +95,17 @@ class CassandraRepository(Repository):
     def __validate_model(model):
         if not isinstance(model, CassandraModelMixin):
             raise ModelValidationException('Expected model to be an instance of CassandraModelMixin, got %r' % model)
+
+    @staticmethod
+    def _cassandra_type_string_to_type(type_string):
+        type_map = {
+            'text': str,
+            'int': int
+        }
+
+        assert type_string in type_map, 'Unknown type_string "%s"' % type_string
+
+        return type_map[type_string]
 
     @staticmethod
     def denormalize(model):
