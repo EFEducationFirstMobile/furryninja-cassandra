@@ -12,15 +12,14 @@ setup(
     author_email='ctx@ef.com',
     description='',
     install_requires=[
-        'mock==1.0.1',
-        'nose==1.3.3',
-        'cassandra-driver',
-        'cql',
-        'blist',
-        'furryninja==0.4.0',
-        'pysandra-unit==0.5'
+        'cassandra-driver==2.1.0',
+        'cql==1.4.0',
+        'blist==1.3.6',
+        'furryninja==0.4.0'
     ],
     tests_require=[
+        'mock==1.0.1',
+        'nose==1.3.3',
         'pysandra-unit==0.5',
     ],
     dependency_links=[
