@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from collections import OrderedDict
 from itertools import ifilter
 import datetime
 import pytz
@@ -14,7 +15,7 @@ from furryninja.repository import Repository
 from furryninja import Settings, KeyProperty, Key, Model, StringProperty, QueryNotFoundException
 from .model import CassandraModelMixin
 from .query import CassandraQuery
-from .exceptions import PrimaryKeyException, ModelValidationException
+from .exceptions import PrimaryKeyException, ModelValidationException, LightweightTransactionException
 
 logger = logging.getLogger('cassandra.repo')
 
@@ -30,7 +31,8 @@ class Edge(Model, CassandraModelMixin):
 
 
 class CassandraRepository(Repository):
-    def __init__(self, connection_class=Cluster):
+
+    def __init__(self, connection_class=Cluster, construct_primary_key=None):
         super(CassandraRepository, self).__init__()
 
         self.settings = dict(host='localhost', port=9042, protocol_version=2)
@@ -52,6 +54,9 @@ class CassandraRepository(Repository):
         self.session = cluster.connect(keyspace=self.settings['name'])
         self.session.row_factory = ordered_dict_factory
 
+        if construct_primary_key:
+            self.construct_primary_key = construct_primary_key
+
     def __get_table_metadata(self, table_name):
         return self.session.cluster.metadata.keyspaces[Settings.get('db.name')].tables[table_name]
 
@@ -59,8 +64,34 @@ class CassandraRepository(Repository):
         metadata = self.__get_table_metadata(model.table())
         return [field.name for field in metadata.primary_key]
 
-    def __construct_primary_key(self, model):
-        metadata = self.__get_table_metadata(model.table())
+    def __execute(self, cql_qry, serial_consistency_level=None):
+        assert isinstance(cql_qry, CassandraQuery), 'cql_qry should be of type CassandraQuery'
+
+        if self.settings.get('serial_consistency_level', None) and not serial_consistency_level:
+            serial_consistency_level = int(self.settings.get('serial_consistency_level'))
+
+        stmt = SimpleStatement(cql_qry.statement, serial_consistency_level=serial_consistency_level)
+        result = self.session.execute(stmt, parameters=cql_qry.condition_values)
+
+        # Cassandra is amazing. But someone did something stupid here.
+        if isinstance(result, list) and len(result) > 0 and isinstance(result[0], OrderedDict):
+            if result[0].get('[applied]', None) and result[0]['[applied]'] is False:
+                raise LightweightTransactionException('Failed to apply transaction')
+
+        return result
+
+    def __execute_batch(self, batch):
+        result = self.session.execute(batch)
+
+        # Cassandra is amazing. But someone did something stupid here.
+        if isinstance(result, list) and len(result) > 0 and isinstance(result[0], OrderedDict):
+            if result[0].get('[applied]', None) is not None and result[0]['[applied]'] is False:
+                raise LightweightTransactionException('Failed to apply transaction')
+
+        return result
+
+    @staticmethod
+    def __construct_primary_key(model, metadata):
         fields = {}
         for key_part in metadata.primary_key:
             if not hasattr(model, key_part.name):
@@ -70,26 +101,11 @@ class CassandraRepository(Repository):
             if isinstance(value, Key):
                 value = value.urlsafe()
             elif value is not None:
-                # value = key_part.data_type.deserialize(struct.pack('>qihbQIHBfd', value), self.settings['protocol_version'])
-                value = self._cassandra_type_string_to_type(key_part.typestring)(value)
+                value = CassandraRepository._cassandra_type_string_to_type(key_part.typestring)(value)
             fields[key_part.name] = value
 
         return fields
-
-    def __execute(self, cql_qry):
-        assert isinstance(cql_qry, CassandraQuery), 'cql_qry should be of type CassandraQuery'
-        serial_consistency_level = None
-        if self.settings.get('serial_consistency_level', None):
-            serial_consistency_level = int(self.settings.get('serial_consistency_level'))
-        # For conditional DELETE, INSERT or UPDATES use lightweight transactions with ConsistencyLevel.SERIAL
-        if 'IF' in cql_qry.statement:
-            serial_consistency_level = ConsistencyLevel.SERIAL
-
-        stmt = SimpleStatement(cql_qry.statement, serial_consistency_level=serial_consistency_level)
-        return self.session.execute(stmt, parameters=cql_qry.condition_values)
-
-    def __execute_batch(self, batch):
-        return self.session.execute(batch)
+    construct_primary_key = __construct_primary_key
 
     @staticmethod
     def __validate_model(model):
@@ -109,39 +125,10 @@ class CassandraRepository(Repository):
 
     @staticmethod
     def denormalize(model):
-        def get_value(attr):
-            attr_value = attr or None
-            if isinstance(attr, (KeyProperty, Key)):
-                attr_value = attr.urlsafe()
-
-            if isinstance(attr, Model):
-                attr_value = attr.key.urlsafe()
-
-            if isinstance(attr, list):
-                attr_value = [get_value(item) for item in attr]
-
-            if isinstance(attr, dict):
-                attr_value = attr
-
-            if isinstance(attr, datetime.datetime):
-                attr_value = attr.replace(tzinfo=pytz.UTC).strftime('%Y-%m-%dT%H:%M:%S.%f%z')
-
-            return attr_value
-
-        def serialize_keys(serialized_node):
-            props = ifilter(lambda x: isinstance(x[1], (Key, KeyProperty, Model, list, dict, datetime.datetime)), serialized_node.items())
-            for name, prop in props:
-                if isinstance(prop, dict):
-                    value = serialize_keys(prop)
-                else:
-                    value = get_value(prop)
-                serialized_node[name] = value
-            return serialized_node
-
         if hasattr(model, '_storage_type_to_db') and callable(getattr(model, '_storage_type_to_db')):
-            return model._storage_type_to_db(serialize_fn=serialize_keys)
+            return model._storage_type_to_db(serialize_fn=lambda x: x)
 
-        return serialize_keys(model.entity_to_db())
+        return model.entity_to_db()
 
     def set_edges_for_model(self, model, new_edges=None, existing_edges=None):
         assert new_edges
@@ -264,14 +251,21 @@ class CassandraRepository(Repository):
 
     def __insert(self, models, if_not_exists=None):
         assert models, 'You can insert nothing, what good would that do?'
-        batch = BatchStatement()
+
+        serial_consistency_level = None
+        if if_not_exists:
+            serial_consistency_level = ConsistencyLevel.SERIAL
+
+        batch = BatchStatement(serial_consistency_level=serial_consistency_level)
+
         for model in models:
             self.__validate_model(model)
 
             model._pre_put_hook()
+            metadata = self.__get_table_metadata(model.table())
 
             fields = self.denormalize(model)
-            fields.update(self.__construct_primary_key(model))
+            fields.update(self.construct_primary_key(model, metadata))
 
             cql_qry = CassandraQuery(model.query()).insert(fields)
             if if_not_exists:
@@ -302,6 +296,8 @@ class CassandraRepository(Repository):
 
         fields = self.denormalize(model)
         where = []
+        serial_consistency_level = None
+
         for field in self.__get_primary_key_fields(model):
             if field in fields:
                 del fields[field]
@@ -313,8 +309,9 @@ class CassandraRepository(Repository):
         if update_if:
             assert isinstance(update_if, tuple) and len(update_if) == 2, 'update_if should be a tuple (field, value) of length 2'
             cql_qry.update_if(update_if[0], update_if[1])
+            serial_consistency_level = ConsistencyLevel.SERIAL
 
-        self.__execute(cql_qry)
+        self.__execute(cql_qry, serial_consistency_level=serial_consistency_level)
 
         model._post_put_hook()
 
