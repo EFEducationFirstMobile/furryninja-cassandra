@@ -235,16 +235,22 @@ class TestCassandraRepository(CassandraTestCaseBase, unittest.TestCase):
         entities = self.repo.fetch(image.query())
         self.assertEqual(len(entities), 1)
 
-    def test_create_model_if_exists(self):
-        image = ImageAsset(**copy.deepcopy(IMAGE_ASSET))
-        self.repo.insert(image)
-
-        entities = self.repo.fetch(image.query())
-        self.assertEqual(len(entities), 1)
-
-        self.repo.insert(image)
-        entities = self.repo.fetch(image.query())
-        self.assertEqual(len(entities), 1)
+    # def test_create_model_if_not_exists(self):
+    #     image = ImageAsset(**copy.deepcopy(IMAGE_ASSET))
+    #     image.name = 'Immutable'
+    #     self.repo.insert(image)
+    #
+    #     entities = self.repo.fetch(image.query())
+    #     self.assertEqual(len(entities), 1)
+    #
+    #     image2 = ImageAsset(urlsafe=image.key.urlsafe())
+    #     image2.version = '42'
+    #     image2.name = 'Or is it?'
+    #     self.repo.insert(image2, if_not_exists=True)
+    #
+    #     entities = self.repo.fetch(image.query())
+    #     self.assertEqual(len(entities), 1)
+    #     self.assertEqual(entities[0].name, 'Immutable')
 
     def test_create_model_multi(self):
         image = ImageAsset(**copy.deepcopy(IMAGE_ASSET))
@@ -449,3 +455,43 @@ class TestCassandraRepository(CassandraTestCaseBase, unittest.TestCase):
 
         entities = self.repo.fetch(article.query())
         self.assertEqual(len(entities), 1)
+
+    def test_custom_construct_primary_key(self):
+        class Article(Model, TestModelMixin):
+            revision = IntegerProperty(default=1)
+            title = StringProperty()
+
+        class KeyPart(object):
+            def __init__(self, name, typestring):
+                self.name = name
+                self.typestring = typestring
+
+        class MetaData(object):
+            primary_key = [KeyPart('key', 'text'), KeyPart('revision', 'int')]
+
+        article = Article(**{'title': 'A magic title'})
+        self.assertDictEqual(self.repo.construct_primary_key(article, MetaData()), {
+            'key': article.key.urlsafe(),
+            'revision': 1
+        })
+
+        def custom_construct_primary_key(model, metadata):
+            return {
+                'key': 'abc',
+                'revision': 1234
+            }
+
+        repo = CassandraRepository(construct_primary_key=custom_construct_primary_key)
+        self.assertDictEqual(repo.construct_primary_key(article, MetaData()), {
+            'key': 'abc',
+            'revision': 1234
+        })
+
+    def test_zero_in_repeated_integer_property(self):
+        class Entity(Model):
+            a_list = IntegerProperty(repeated=True)
+
+        en = Entity()
+        en.a_list = [0, 1, 0, 1, 0, 1]
+
+        self.assertEqual(CassandraRepository.denormalize(en)['a_list'], [0, 1, 0, 1, 0, 1])

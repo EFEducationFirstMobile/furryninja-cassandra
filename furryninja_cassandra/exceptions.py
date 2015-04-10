@@ -7,3 +7,7 @@ class PrimaryKeyException(Exception):
 
 class ModelValidationException(Exception):
     pass
+
+
+class LightweightTransactionException(Exception):
+    pass
