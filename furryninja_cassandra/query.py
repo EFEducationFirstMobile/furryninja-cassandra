@@ -52,6 +52,12 @@ class CassandraQuery(object):
             return ' OFFSET %i' % self.query.offset()
         return ''
 
+    def _order_by(self):
+        prop, direction = self.query.order_by()
+        if prop:
+            return ' ORDER BY %s %s' % (prop, direction)
+        return ''
+
     def select(self, fields=None):
         query_fields = ', '.join(fields) if fields else '*'
         query_string = 'SELECT %s FROM %s' % (query_fields, lower(self.query.table))
@@ -59,6 +65,7 @@ class CassandraQuery(object):
         where_string, condition_values = self._where_clause(self.query.filters())
         query_string += where_string
 
+        query_string += self._order_by()
         query_string += self._limit()
         query_string += self._offset()
 
