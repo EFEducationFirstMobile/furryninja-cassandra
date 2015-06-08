@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name='furryninja_cassandra',
-    version='0.3.5',
+    version='0.3.6',
     packages=[
         'furryninja_cassandra',
     ],
