@@ -1,4 +1,5 @@
 import datetime
+import uuid
 import pytz
 import simplejson as json
 from simplejson import JSONEncoder
@@ -13,6 +14,8 @@ class ModelJsonEncoder(JSONEncoder):
             return o.urlsafe()
         elif isinstance(o, Model):
             return o.entity_values(unset=True)
+        elif isinstance(o, uuid.UUID):
+            return str(o)
         elif isinstance(o, datetime.datetime):
             return o.replace(tzinfo=pytz.UTC).strftime('%Y-%m-%dT%H:%M:%S.%f%z')
         else:
