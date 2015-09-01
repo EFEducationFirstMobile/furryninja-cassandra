@@ -10,7 +10,7 @@ from furryninja.model import DateTimeProperty
 from furryninja import Settings
 from furryninja import QueryNotFoundException
 from furryninja_cassandra.query import CassandraQuery
-from .repository import CassandraRepository, Edge
+from .repository import CassandraRepository
 from .model import CassandraModelMixin
 
 __author__ = 'broken'
@@ -171,57 +171,6 @@ class TestCassandraRepository(CassandraTestCaseBase, unittest.TestCase):
 
         json.dumps(self.repo.denormalize(book))
 
-    def test_find_edges(self):
-        image = ImageAsset(**copy.deepcopy(IMAGE_ASSET))
-        expected = self.repo.find_edges(image)
-
-        self.assertEqual(expected[0].label, 'topics')
-        self.assertEqual(expected[1].label, 'attributes.imageFormat')
-        self.assertEqual(expected[2].label, 'attributes.imageFormat')
-        self.assertEqual(expected[3].label, 'attributes.imageType')
-
-        duplicate_image_format = copy.deepcopy(IMAGE_ASSET)
-        duplicate_image_format['attributes']['imageFormat'] = [
-            'G9dCxjCen-P5Ep0LbmbM7yy',
-            'G9dCxjCen-P5Ep0LbmbM7yy'
-        ]
-
-        image = ImageAsset(**duplicate_image_format)
-        expected = self.repo.find_edges(image)
-
-        self.assertEqual(expected[0].label, 'topics')
-        self.assertEqual(expected[1].label, 'attributes.imageFormat')
-        self.assertEqual(expected[2].label, 'attributes.imageType')
-
-    def test_find_edges_with_complex_model(self):
-        class Entity(Model):
-            ref = KeyProperty(kind=Tag)
-            relations = AttributesProperty(attributes={
-                'asset': KeyProperty(kind=Tag)
-            })
-            assets = AttributesProperty(repeated=True, attributes={
-                'asset': KeyProperty(kind=Tag)
-            })
-
-        self.repo.find_edges(Entity())
-
-    def test_create_edges(self):
-        image = ImageAsset(**copy.deepcopy(IMAGE_ASSET))
-        edges = self.repo.find_edges(image)
-
-        self.repo.set_edges_for_model(image, edges)
-
-        cql_edges = self.repo.fetch(Edge.query())
-        self.assertEqual(len(cql_edges), 4)
-        self.assertEqual(cql_edges[0].indoc.urlsafe(), image.key.urlsafe())
-        self.assertEqual(cql_edges[0].outdoc.urlsafe(), 'G9dCxjCen-4QD1ydlavEYj4')
-
-        with mock.patch.object(self.repo, 'insert_edge') as insert_edge:
-            self.repo.set_edges_for_model(image, edges)
-            self.assertEqual(insert_edge.call_count, 4)
-
-            self.assertEqual(insert_edge.call_args[0][0].indoc.urlsafe(), image.key.urlsafe())
-            self.assertEqual(insert_edge.call_args[0][0].outdoc.urlsafe(), edges[3].outdoc.urlsafe())
 
     def test_create_model(self):
         image = ImageAsset(**copy.deepcopy(IMAGE_ASSET))
@@ -356,39 +305,6 @@ class TestCassandraRepository(CassandraTestCaseBase, unittest.TestCase):
         video = self.repo.get(video)
         self.assertEqual(video.title, 'Hello, earth!')
 
-    def test_update_edges(self):
-        image = ImageAsset(**copy.deepcopy(IMAGE_ASSET))
-
-        edges = self.repo.find_edges(image)
-        self.repo.set_edges_for_model(image, edges, [])
-
-        cql_edges = self.repo.fetch(Edge.query())
-        self.assertEqual(len(cql_edges), 4)
-
-        removed_edge = image.attributes.imageFormat.pop()
-        image.attributes.imageFormat = [image.attributes.imageFormat[0]]
-        existing_edges = edges
-        existing_edges[-1] = Edge(**{
-            'key': 'EJLCVyC5AUEQ-AxpVmA5oQwRWZ',
-            'label': existing_edges[-1].label,
-            'outdoc': existing_edges[-1].outdoc
-        })
-
-        edges = self.repo.find_edges(image)
-
-        self.repo.set_edges_for_model(image, edges, existing_edges)
-        cql_edges = self.repo.fetch(Edge.query())
-        self.assertEqual(len(cql_edges), 3)
-
-        # Adding one will result in 1 new edges and 0 delete.
-        image.attributes.imageFormat = image.attributes.imageFormat + [removed_edge]
-        existing_edges = edges
-        edges = self.repo.find_edges(image)
-
-        self.repo.set_edges_for_model(image, edges, existing_edges)
-        cql_edges = self.repo.fetch(Edge.query())
-        self.assertEqual(len(cql_edges), 4)
-
     def test_delete_model(self):
         image = ImageAsset(**copy.deepcopy(IMAGE_ASSET))
         self.repo.insert(image)
@@ -396,16 +312,10 @@ class TestCassandraRepository(CassandraTestCaseBase, unittest.TestCase):
         entities = self.repo.fetch(image.query())
         self.assertEqual(len(entities), 1)
 
-        cql_edges = self.repo.fetch(Edge.query())
-        self.assertEqual(len(cql_edges), 4)
-
         self.repo.delete(image)
 
         entities = self.repo.fetch(image.query())
         self.assertEqual(len(entities), 0)
-
-        cql_edges = self.repo.fetch(Edge.query())
-        self.assertEqual(len(cql_edges), 0)
 
     def test_fetch_query(self):
         image1 = ImageAsset(**{'title': 'title1'})
