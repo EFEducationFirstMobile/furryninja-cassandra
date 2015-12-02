@@ -15,7 +15,7 @@ setup(
         'cassandra-driver==2.1.0',
         'cql==1.4.0',
         'blist==1.3.6',
-        'furryninja==0.4.3'
+        'furryninja==0.4.4'
     ],
     tests_require=[
         'mock==1.0.1',
