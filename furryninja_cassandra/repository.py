@@ -20,6 +20,11 @@ from .exceptions import PrimaryKeyException, ModelValidationException, Lightweig
 logger = logging.getLogger('cassandra.repo')
 
 
+def _execute_query(session, query, *args, **kwargs):
+    logger.info("[CQL] (furryninja-cassandra) %s <args: %s> <kwargs: %s>", query, args, kwargs)
+    return session.execute(query, *args, **kwargs)
+
+
 class Edge(Model, CassandraModelMixin):
     _storage_type = ('simple',)
 
@@ -75,7 +80,7 @@ class CassandraRepository(Repository):
             serial_consistency_level = int(self.settings.get('serial_consistency_level'))
 
         stmt = SimpleStatement(cql_qry.statement, serial_consistency_level=serial_consistency_level)
-        result = self.session.execute(stmt, parameters=cql_qry.condition_values)
+        result = _execute_query(self.session, stmt, parameters=cql_qry.condition_values)
 
         # Cassandra is amazing. But someone did something stupid here.
         if isinstance(result, list) and len(result) > 0 and isinstance(result[0], OrderedDict):
@@ -86,7 +91,7 @@ class CassandraRepository(Repository):
     execute = _execute
 
     def _execute_batch(self, batch):
-        result = self.session.execute(batch)
+        result = _execute_query(self.session, batch)
 
         # Cassandra is amazing. But someone did something stupid here.
         if isinstance(result, list) and len(result) > 0 and isinstance(result[0], OrderedDict):
