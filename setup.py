@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name='furryninja_cassandra',
-    version='0.3.9',
+    version='0.4.1',
     packages=[
         'furryninja_cassandra',
     ],
@@ -15,7 +15,7 @@ setup(
         'cassandra-driver==2.1.0',
         'cql==1.4.0',
         'blist==1.3.6',
-        'furryninja==0.4.4'
+        'furryninja==0.4.5'
     ],
     tests_require=[
         'mock==1.0.1',
@@ -23,7 +23,7 @@ setup(
         'pysandra-unit==0.5',
     ],
     dependency_links=[
-        'git+ssh://git@github.com/EFEducationFirstMobile/furry-ninja.git@v0.4.4#egg=furryninja-0.4.4',
+        'git+ssh://git@github.com/EFEducationFirstMobile/furry-ninja.git@v0.4.5#egg=furryninja-0.4.5',
         'git+https://github.com/Zemanta/pysandra-unit.git@fea_cassandra_unit_20#egg=pysandra-unit-0.5'
     ]
 )
