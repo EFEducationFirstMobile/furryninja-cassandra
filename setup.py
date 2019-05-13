@@ -16,7 +16,7 @@ setup(
         'cql==1.4.0',
         'blist==1.3.6',
         'tornado==4.5.1',
-        'furryninja==0.4.5'
+        'furryninja==0.5.0'
     ],
     tests_require=[
         'mock==1.0.1',
@@ -24,7 +24,7 @@ setup(
         'pysandra-unit==0.5',
     ],
     dependency_links=[
-        'git+ssh://git@github.com/EFEducationFirstMobile/furry-ninja.git@v0.4.5#egg=furryninja-0.4.5',
+        'git+ssh://git@github.com/EFEducationFirstMobile/furry-ninja.git@v0.5.0#egg=furryninja',
         'git+https://github.com/Zemanta/pysandra-unit.git@fea_cassandra_unit_20#egg=pysandra-unit-0.5'
     ]
 )
