@@ -12,7 +12,7 @@ setup(
     author_email='ctx@ef.com',
     description='',
     install_requires=[
-        'cassandra-driver==2.1.0',
+        'cassandra-driver',
         'cql==1.4.0',
         'blist==1.3.6',
         'tornado==4.5.1',
