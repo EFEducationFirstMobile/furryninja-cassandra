@@ -131,7 +131,7 @@ echo "Writing new version to $PKG_RESOURCE"
 write_new_version
 
 echo "Commiting changes..."
-git commit -am "chore: relase v$NEW_VERSION" &>$LOGFILE
+git commit -am "chore: release v$NEW_VERSION" &>$LOGFILE
 git tag "v$NEW_VERSION" -am "chore: stamp release v$NEW_VERSION" &>$LOGFILE
 
 echo "Pushing release..."
