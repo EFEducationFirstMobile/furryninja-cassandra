@@ -16,7 +16,7 @@ setup(
         'cql==1.4.0',
         'blist==1.3.6',
         'tornado==4.5.1',
-        'furryninja==0.5.0'
+        'furryninja'
     ],
     tests_require=[
         'mock==1.0.1',
