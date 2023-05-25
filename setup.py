@@ -15,7 +15,7 @@ setup(
         'cassandra-driver',
         'cql==1.4.0',
         'blist==1.3.6',
-        'tornado==4.5.1',
+        'tornado==6.3.2',
         'furryninja'
     ],
     tests_require=[
